@@ -88,7 +88,7 @@ namespace BtiaWatch
         }
 
         [McpServerTool(Name = "watch_db", Title = "Actual values of data blocks", ReadOnly = true, Destructive = false, OpenWorld = false),
-         Description("Read the actual values of one or more data blocks: takes a snapshot of each (ValueService.CreateSnapshot) and returns its values as 'path = value (type)' lines, nested members as 'A.B[2].C'. The PLC must be online (watch_online); offline the snapshot would silently stay empty, so the call is refused. The snapshot is stored in the offline project, which TIA Portal then shows as changed. Fail-safe data blocks are refused.")]
+         Description("Read the actual values of one or more data blocks: takes a snapshot of each (ValueService.CreateSnapshot) and returns, per block, 'Snapshot taken: <time>' and one 'path = value (type)' line per member, nested members as 'A.B[2].C'. The PLC must be online (watch_online); offline the snapshot would silently stay empty, so the call is refused. The snapshot is stored in the offline project, which TIA Portal then shows as changed. Fail-safe data blocks are refused.")]
         public static CallToolResult WatchDb(
             [Description("dbNames: data block names, separated by commas")] string dbNames,
             [Description("plc: name of the PLC software. Leave empty when the project has one PLC")] string? plc = null,
@@ -120,13 +120,13 @@ namespace BtiaWatch
         }
 
         [McpServerTool(Name = "watch_screen", Title = "Screenshot of a monitored editor", ReadOnly = true, Destructive = false, OpenWorld = false),
-         Description("Open a watch table, tag table or block in TIA Portal (ShowInEditor), switch on monitoring with Ctrl+T and return a PNG capture of the TIA Portal window. Ctrl+T is only sent when the PLC is online over a connection this server opened with watch_online goOnline; otherwise the capture shows the editor without monitoring. Ctrl+T toggles monitoring, so it is not sent when the editor's Monitor button reads as already on; when that state cannot be read, it is sent once with a warning.")]
+         Description("Open a watch table, tag table or block in TIA Portal (ShowInEditor) and return a PNG capture of the TIA Portal window, with monitoring switched on when possible. Ctrl+T (Monitor all) is only sent when the PLC is online over a connection this server opened with watch_online goOnline, and only when monitoring is not already on: the state is read from the pressed state of the Monitor button in the editor's toolbar, retried for up to settleMs while the editor is still drawing. When the state cannot be read, Ctrl+T is sent once with a warning. After Ctrl+T the state is read again and the result says whether monitoring is on.")]
         public static CallToolResult WatchScreen(
             [Description("name: name of the watch table, tag table or block")] string name,
             [Description("kind: 'watchTable' (default), 'tagTable' or 'block'")] string kind = "watchTable",
             [Description("plc: name of the PLC software. Leave empty when the project has one PLC")] string? plc = null,
             [Description("sendShortcut: send Ctrl+T (Monitor all) to the editor. Default true; false only captures")] bool sendShortcut = true,
-            [Description("settleMs: wait before the capture, in milliseconds")] int settleMs = DefaultSettleMs,
+            [Description("settleMs: wait before the capture, and the longest wait for the monitoring state to become readable, in milliseconds")] int settleMs = DefaultSettleMs,
             [Description("portalId: process id of the TIA Portal instance. Leave empty when only one is running")] int? portalId = null)
         {
             return Run(() =>
@@ -157,11 +157,11 @@ namespace BtiaWatch
                 }
 
                 // Ctrl+T toggles, so it is only sent when monitoring is not already on.
-                var wasOn = Windows.IsMonitoring(hwnd);
+                var wasOn = ReadMonitoring(hwnd, settleMs);
                 if (wasOn == true)
                 {
                     Thread.Sleep(settleMs);
-                    return Image(kind, name, "Monitoring was already on; Ctrl+T not sent." + MonitoringNote(hwnd), Windows.Capture(hwnd));
+                    return Image(kind, name, "Monitoring was already on; Ctrl+T not sent." + MonitoringNote(hwnd, settleMs), Windows.Capture(hwnd));
                 }
 
                 var before = Windows.OtherWindowsOfProcess(hwnd);
@@ -185,7 +185,7 @@ namespace BtiaWatch
 
                     var note = wasOn == null
                         ? "Sent Ctrl+T (Monitor all). Warning: the monitoring state could not be read and Ctrl+T toggles monitoring; if the capture shows no monitor values, it was switched off."
-                        : "Sent Ctrl+T (Monitor all)." + MonitoringNote(hwnd);
+                        : "Sent Ctrl+T (Monitor all)." + MonitoringNote(hwnd, settleMs);
                     return Image(kind, name, note, Windows.Capture(hwnd));
                 }
                 finally
@@ -198,7 +198,25 @@ namespace BtiaWatch
             });
         }
 
-        private static string MonitoringNote(IntPtr hwnd) => Windows.IsMonitoring(hwnd) switch
+        /// <summary>
+        /// Reads the Monitor button until it answers; right after ShowInEditor the toolbar is often not drawn yet
+        /// (live, V21), so a single read returned null.
+        /// </summary>
+        internal static bool? ReadMonitoring(IntPtr hwnd, int maxWaitMs)
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            while (true)
+            {
+                var state = Windows.IsMonitoring(hwnd);
+                if (state != null || watch.ElapsedMilliseconds >= maxWaitMs)
+                {
+                    return state;
+                }
+                Thread.Sleep(200);
+            }
+        }
+
+        private static string MonitoringNote(IntPtr hwnd, int maxWaitMs) => ReadMonitoring(hwnd, maxWaitMs) switch
         {
             true => " Monitoring is on.",
             false => " Warning: monitoring reads as off; the capture may show no monitor values.",

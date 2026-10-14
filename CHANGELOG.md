@@ -18,6 +18,12 @@
 
 ### Fixed
 
+- `watch_screen` read the monitoring state once, right after `ShowInEditor()`, before TIA Portal had drawn the editor's
+  toolbar, so it got no answer and sent Ctrl+T blind (live, V21). It now retries the read every 200 ms until it
+  answers, for at most `settleMs`, before deciding on Ctrl+T, and again after Ctrl+T; `settleMs` is the bound because
+  it is already the caller's knob for a slow TIA Portal, so no new parameter is needed. Unreadable after that: Ctrl+T
+  once with a warning, as before. Tool descriptions of `watch_screen` and `watch_db` match the actual behaviour.
+
 - `watch_db` returned only the block name: the values sit in the read-only `Snapshot` attribute, which
   `InterfaceSnapshot.Export` leaves out unless `ExportOptions.WithReadOnly` is set (verified online, V21). The tool now
   returns `Snapshot taken: <time>` and one `path = value (type)` line per member (`A.B[2].C`); an export without

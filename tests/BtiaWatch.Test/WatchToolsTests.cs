@@ -71,7 +71,11 @@ namespace BtiaWatch.Test
         /// <summary>What the Monitor button reads before and after Ctrl+T; null = not found (the default).</summary>
         public bool? MonitoringBefore, MonitoringAfter;
 
-        public bool? IsMonitoring(IntPtr hwnd) => ShortcutSent ? MonitoringAfter : MonitoringBefore;
+        /// <summary>Reads returned first, one per call, before falling back to MonitoringBefore/After.</summary>
+        public readonly Queue<bool?> MonitoringReads = new();
+
+        public bool? IsMonitoring(IntPtr hwnd) =>
+            MonitoringReads.Count > 0 ? MonitoringReads.Dequeue() : ShortcutSent ? MonitoringAfter : MonitoringBefore;
 
         public byte[] Capture(IntPtr hwnd) { Log.Add($"capture {hwnd}"); return Png; }
         public void Restore(IntPtr hwnd) => Log.Add($"restore {hwnd}");
@@ -295,6 +299,35 @@ namespace BtiaWatch.Test
 
             Assert.AreEqual(1, _windows.Log.Count(l => l.StartsWith("ctrl+t")));
             StringAssert.Contains(text, "reads as off");
+        }
+
+        [TestMethod]
+        public void WatchScreen_StateUnreadableThenOn_RetriesAndSendsNoCtrlT()
+        {
+            GoOnlineByTool();
+            _windows.MonitoringReads.Enqueue(null);
+            _windows.MonitoringReads.Enqueue(true);
+            _windows.MonitoringBefore = true;
+
+            var text = TextOf(WatchTools.WatchScreen("Watch_1", settleMs: 1000));
+
+            Assert.AreEqual(0, _windows.Log.Count(l => l.StartsWith("ctrl+t")));
+            StringAssert.Contains(text, "already on");
+        }
+
+        [TestMethod]
+        public void WatchScreen_StateUnreadableThenOff_RetriesAndSendsCtrlT()
+        {
+            GoOnlineByTool();
+            _windows.MonitoringReads.Enqueue(null);
+            _windows.MonitoringReads.Enqueue(false);
+            _windows.MonitoringAfter = true;
+
+            var text = TextOf(WatchTools.WatchScreen("Watch_1", settleMs: 1000));
+
+            Assert.AreEqual(1, _windows.Log.Count(l => l.StartsWith("ctrl+t")));
+            StringAssert.Contains(text, "Monitoring is on.");
+            Assert.IsFalse(text.Contains("could not be read"), text);
         }
 
         [TestMethod]
