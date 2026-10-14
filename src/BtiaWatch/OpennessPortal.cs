@@ -1,4 +1,5 @@
 using Siemens.Engineering;
+using Siemens.Engineering.Connection;
 using Siemens.Engineering.HW;
 using Siemens.Engineering.HW.Features;
 using Siemens.Engineering.Online;
@@ -31,23 +32,34 @@ namespace BtiaWatch
             }
         }
 
-        public string SetOnline(int? portalId, string? plc, bool online)
+        public string GoOnline(int? portalId, string? plc, string pcInterface, string address)
         {
             lock (_lock)
             {
                 var provider = Online(FindPlc(portalId, plc));
-                if (online)
+                var interfaces = provider.Configuration.Modes
+                    .SelectMany(m => m.PcInterfaces.Select(i => (Mode: m.Name, Interface: i)))
+                    .ToList();
+                var matches = interfaces.Where(i => i.Interface.Name == pcInterface).ToList();
+                if (matches.Count != 1)
                 {
-                    if (!provider.Configuration.IsConfigured)
-                    {
-                        throw new InvalidOperationException("The online connection of this PLC is not configured. Go online once in TIA Portal to choose the interface.");
-                    }
-                    provider.GoOnline();
+                    throw new ArgumentException($"{matches.Count} PC interfaces are named '{pcInterface}'. Available: " +
+                        string.Join(", ", interfaces.Select(i => $"{i.Mode}: {i.Interface.Name} #{i.Interface.Number}")));
                 }
-                else
-                {
-                    provider.GoOffline();
-                }
+
+                // shortcut: address created on the PC interface as GoOnline(ConfigurationAddress) expects; not yet tried against a PLC.
+                var addresses = matches[0].Interface.Addresses;
+                provider.GoOnline(addresses.Find(address) ?? addresses.Create(address));
+                return provider.State.ToString();
+            }
+        }
+
+        public string GoOffline(int? portalId, string? plc)
+        {
+            lock (_lock)
+            {
+                var provider = Online(FindPlc(portalId, plc));
+                provider.GoOffline();
                 return provider.State.ToString();
             }
         }
@@ -68,11 +80,10 @@ namespace BtiaWatch
 
                 var values = db.Interface.GetService<ValueService>()
                     ?? throw new InvalidOperationException($"'{dbName}' offers no value service.");
+                // The snapshot service sits on the block itself; on the interface it is null (spike, V21).
+                var snapshot = db.GetService<InterfaceSnapshot>()
+                    ?? throw new InvalidOperationException($"'{dbName}' offers no snapshot service.");
                 values.CreateSnapshot();
-
-                // shortcut: where the snapshot service lives (block or interface) is not verified yet; the spike decides.
-                var snapshot = db.GetService<InterfaceSnapshot>() ?? db.Interface.GetService<InterfaceSnapshot>()
-                    ?? throw new InvalidOperationException($"No snapshot found for '{dbName}' after CreateSnapshot.");
 
                 var file = new FileInfo(Path.Combine(Path.GetTempPath(), $"btia-watch-{Guid.NewGuid():N}.xml"));
                 try

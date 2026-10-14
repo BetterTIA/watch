@@ -23,6 +23,8 @@ namespace BtiaWatch.Test
             // "WatchAndForceTableGroup" is the only Openness route to the watch tables, so match whole words only.
             @"\b" + "For" + @"ceTables\b",
             @"\bPlc" + "For" + "ceTable",
+            // Going online without an address connects over the last used interface to whatever the project names.
+            "Go" + @"Online\(\s*\)",
         };
 
         [TestMethod]

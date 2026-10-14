@@ -19,8 +19,14 @@ namespace BtiaWatch
         /// <summary>OnlineProvider.State of the CPU, e.g. "Online", "Offline".</summary>
         string GetOnlineState(int? portalId, string? plc);
 
-        /// <summary>GoOnline() or GoOffline() on the CPU; returns the state afterwards.</summary>
-        string SetOnline(int? portalId, string? plc, bool online);
+        /// <summary>
+        /// GoOnline(ConfigurationAddress) to an explicit address over a named PC interface; returns the state afterwards.
+        /// There is deliberately no way to go online over the default interface to the address stored in the project.
+        /// </summary>
+        string GoOnline(int? portalId, string? plc, string pcInterface, string address);
+
+        /// <summary>GoOffline() on the CPU; returns the state afterwards.</summary>
+        string GoOffline(int? portalId, string? plc);
 
         /// <summary>Takes a snapshot of the actual values of one data block and returns its SimaticML export.</summary>
         string ExportDbSnapshot(int? portalId, string? plc, string dbName);

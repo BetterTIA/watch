@@ -16,7 +16,9 @@
     <PackageReference Include="Siemens.Collaboration.Net.TiaPortal.Packages.Openness" Version="21.0.1765349347" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="BtiaWatch.Test" />
+  </ItemGroup>
+  <ItemGroup>
     <Reference Include="System.Drawing" />
-    <Reference Include="System.Windows.Forms" />
   </ItemGroup>
 </Project>

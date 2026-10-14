@@ -1,10 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
-using System.Windows.Forms;
 
 namespace BtiaWatch
 {
@@ -54,24 +55,92 @@ namespace BtiaWatch
             return stream.ToArray();
         }
 
+        /// <summary>Shows a minimized window in its last size without activating it; PrintWindow cannot capture it minimized.</summary>
+        public static void Restore(IntPtr hwnd)
+        {
+            if (IsIconic(hwnd))
+            {
+                ShowWindow(hwnd, ShowNoActivate);
+                Thread.Sleep(300);
+            }
+        }
+
+        public static IntPtr Foreground() => GetForegroundWindow();
+
+        public static void Activate(IntPtr hwnd) => SetForegroundWindow(hwnd);
+
         /// <summary>
-        /// Brings the window to the front and sends a key sequence in SendKeys notation (e.g. "^t").
-        /// Returns false and sends nothing when the window could not be made the foreground window,
+        /// Brings the window to the front and presses the keys with SendInput (no Alt: it would open the menu bar).
+        /// Returns false and presses nothing when the window could not be made the foreground window,
         /// so the keys never land in another application.
         /// </summary>
-        public static bool SendKeysTo(IntPtr hwnd, string keys, int settleMs)
+        public static bool PressKeys(IntPtr hwnd, params ushort[] keys)
         {
             SetForegroundWindow(hwnd);
-            Thread.Sleep(Math.Min(settleMs, 500));
-
+            Thread.Sleep(200);
             if (GetForegroundWindow() != hwnd)
             {
                 return false;
             }
 
-            SendKeys.SendWait(keys);
-            return true;
+            var inputs = keys.Select(k => Key(k, false)).Concat(Enumerable.Reverse(keys).Select(k => Key(k, true))).ToArray();
+            return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<Input>()) == inputs.Length;
         }
+
+        public const ushort VkControl = 0x11, VkT = 0x54, VkEscape = 0x1B;
+
+        /// <summary>Visible top-level windows with a title that belong to the process of <paramref name="hwnd"/>, except that window.</summary>
+        public static IReadOnlyList<IntPtr> OtherWindowsOfProcess(IntPtr hwnd)
+        {
+            GetWindowThreadProcessId(hwnd, out var pid);
+            var found = new List<IntPtr>();
+            EnumWindows((w, _) =>
+            {
+                GetWindowThreadProcessId(w, out var owner);
+                if (w != hwnd && owner == pid && IsWindowVisible(w) && GetWindowTextLength(w) > 0)
+                {
+                    found.Add(w);
+                }
+                return true;
+            }, IntPtr.Zero);
+            return found;
+        }
+
+        private static Input Key(ushort vk, bool up) => new() { Type = 1, Vk = vk, Flags = up ? 2u : 0u };
+
+        // INPUT with its keyboard member, laid out for 64-bit processes only (both projects build x64).
+        [StructLayout(LayoutKind.Explicit, Size = 40)]
+        private struct Input
+        {
+            [FieldOffset(0)] public uint Type;
+            [FieldOffset(8)] public ushort Vk;
+            [FieldOffset(10)] public ushort Scan;
+            [FieldOffset(12)] public uint Flags;
+            [FieldOffset(16)] public uint Time;
+            [FieldOffset(24)] public IntPtr ExtraInfo;
+        }
+
+        private const int ShowNoActivate = 4;
+
+        private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint SendInput(uint count, Input[] inputs, int size);
+
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hwnd, int command);
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hwnd);
+
+        [DllImport("user32.dll")]
+        private static extern int GetWindowTextLength(IntPtr hwnd);
 
         [StructLayout(LayoutKind.Sequential)]
         private struct Rect
@@ -101,5 +170,32 @@ namespace BtiaWatch
 
         [DllImport("user32.dll")]
         internal static extern bool SetProcessDPIAware();
+    }
+}
+
+namespace BtiaWatch
+{
+    /// <summary>The window operations watch_screen needs; replaceable so tests need no real window behind a fake portal.</summary>
+    public interface IWindowOps
+    {
+        byte[] Capture(IntPtr hwnd);
+        void Restore(IntPtr hwnd);
+        IntPtr Foreground();
+        void Activate(IntPtr hwnd);
+        /// <summary>Ctrl+T ("Monitor all" toggle in every STEP 7 editor of V21); false when nothing was sent.</summary>
+        bool SendMonitorShortcut(IntPtr hwnd);
+        bool PressEscape(IntPtr hwnd);
+        IReadOnlyList<IntPtr> OtherWindowsOfProcess(IntPtr hwnd);
+    }
+
+    public sealed class Win32Windows : IWindowOps
+    {
+        public byte[] Capture(IntPtr hwnd) => WindowCapture.CapturePng(hwnd);
+        public void Restore(IntPtr hwnd) => WindowCapture.Restore(hwnd);
+        public IntPtr Foreground() => WindowCapture.Foreground();
+        public void Activate(IntPtr hwnd) => WindowCapture.Activate(hwnd);
+        public bool SendMonitorShortcut(IntPtr hwnd) => WindowCapture.PressKeys(hwnd, WindowCapture.VkControl, WindowCapture.VkT);
+        public bool PressEscape(IntPtr hwnd) => WindowCapture.PressKeys(hwnd, WindowCapture.VkEscape);
+        public IReadOnlyList<IntPtr> OtherWindowsOfProcess(IntPtr hwnd) => WindowCapture.OtherWindowsOfProcess(hwnd);
     }
 }
