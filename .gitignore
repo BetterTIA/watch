@@ -6,3 +6,4 @@ TestResults/
 *.user
 # window captures may show project content; never commit them
 *.png
+*.log

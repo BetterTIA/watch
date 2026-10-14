@@ -6,15 +6,15 @@ or block - without someone taking screenshots by hand.
 
 It is the fourth tool of the BetterTIA set, next to Reader, Writer and Editor.
 
-> Status: early. The tools build and are tested against a fake TIA Portal; the online behaviour still waits for a
-> test against a simulator or test PLC (see below).
+> Status: early (0.1.x). The tools are tested against a fake TIA Portal and were checked once against a real PLC
+> with TIA Portal V21 (see below).
 
 ## Tools
 
 | Tool | What it does | Source |
 | --- | --- | --- |
-| `watch_online` | Online state of a PLC (`OnlineProvider.State`); `action` `goOnline` connects to an allowed `target` address over a named `pcInterface`, `goOffline` disconnects | Openness |
-| `watch_db` | Actual values of one or more data blocks: `ValueService.CreateSnapshot()`, then `InterfaceSnapshot.Export()`; the SimaticML export is returned as text. Requires the PLC to be online | Openness |
+| `watch_online` | Online state of a PLC (`OnlineProvider.State`); `action` `goOnline` connects to an allowed `target` address over a named `pcInterface` (or adopts a connection that is already online), `goOffline` disconnects | Openness |
+| `watch_db` | Actual values of one or more data blocks: `ValueService.CreateSnapshot()`, then `InterfaceSnapshot.Export()` with read-only attributes; returns the snapshot time and one `path = value (type)` line per member. Requires the PLC to be online | Openness |
 | `watch_screen` | Opens a watch table, tag table or block (`ShowInEditor()`), sends Ctrl+T ("Monitor all") when allowed, and returns a PNG capture of the TIA Portal window (`PrintWindow`) as MCP image content | Openness + Win32 |
 
 Common parameters: `plc` (PLC software name, optional when the project has one PLC) and `portalId` (process id,
@@ -36,8 +36,12 @@ optional when one TIA Portal is running). The server attaches to a running TIA P
   "Go online" dialog and connect by itself over the last used interface. `watch_screen` therefore sends Ctrl+T only
   when `OnlineProvider.State` is `Online` and the connection was opened by `watch_online goOnline` of this server
   process. Otherwise it captures the editor without the shortcut and says why. `sendShortcut=false` never sends it.
-- **Ctrl+T is a toggle.** The server cannot tell whether monitoring is already on; one call sends it at most once,
-  and the answer warns that a second call may switch monitoring off.
+- **Ctrl+T is a toggle.** Before sending it, the server reads the pressed state of the editor's "Monitor" toolbar
+  button (MSAA) and sends Ctrl+T only when monitoring is off; afterwards it reads the state again. When the button
+  cannot be read, Ctrl+T is sent once with a warning. One call sends it at most once.
+- **Adopted connections.** If the PLC is already online (for example from an earlier server process), `goOnline`
+  still checks `target` against the allowed list and then adopts the connection. Openness does not expose the address
+  of an open connection, so the adopted connection is not compared with `target`.
 - **Foreign dialogs.** If a new window of the TIA Portal process appears after Ctrl+T, it is closed with Esc and the
   call fails.
 - **Focus.** A minimized TIA Portal window is restored without activation before the capture; for the shortcut
@@ -54,19 +58,15 @@ optional when one TIA Portal is running). The server attaches to a running TIA P
 - Side effects that remain: `watch_db` stores the snapshot in the offline project, so TIA Portal shows the project as
   changed (the server never saves it); `watch_screen` opens an editor and briefly brings TIA Portal to the front.
 
-## Verified offline, not yet online
+## Verified so far
 
-Checked against TIA Portal V21 without a PLC: where the services live (`InterfaceSnapshot` on the block,
-`ValueService` on the block interface), that Ctrl+T reaches every STEP 7 editor through `SendInput`, and that
-`PrintWindow` captures a restored window. Still to be confirmed with a simulator or test PLC:
+Checked against TIA Portal V21 with a real PLC: `goOnline` over a named PG/PC interface, adopting an existing
+connection, `watch_db` values of global DBs with structures and arrays, `watch_screen` on a watch table, a tag table
+and a LAD block (monitoring state read, Ctrl+T sent only when off), `goOffline`. Call the tools one after another:
+two concurrent `watch_screen` calls fight over the active editor.
 
-- `GoOnline(ConfigurationAddress)` with an address created on the chosen PC interface, and whether it needs a
-  configured connection path first.
-- The structure of a snapshot export with values (to be parsed into name/value rows), and whether the project is
-  marked as changed.
-- That Ctrl+T switches monitoring on, how long values take to appear (`settleMs`, default 3000 ms), and that monitor
-  values are readable in the capture.
-- Instance DBs of GRAPH blocks, technology objects; other monitors and DPI scaling.
+Not yet checked: instance DBs of GRAPH blocks, technology objects, very large DBs, floating editors, other monitors
+and DPI scaling.
 
 ## Requirements
 
@@ -87,13 +87,16 @@ tested on a window of the test process.
 
 ## Register in Claude Code
 
-Add the server to `.mcp.json` under the key `BTIA_Watch`:
+A running server locks its `.exe`, so build a copy per version and point the client at that copy, e.g.
+`dotnet build src\BtiaWatch -c Release -o dist\0.1.3` (`dist/` is ignored by git). Add the server to `.mcp.json`
+under the key `BTIA_Watch`:
 
 ```json
 "BTIA_Watch": {
   "type": "stdio",
-  "command": "<repository>\\src\\BtiaWatch\\bin\\Release\\net48\\BtiaWatch.exe",
-  "args": []
+  "command": "<repository>\\dist\\0.1.3\\BtiaWatch.exe",
+  "args": [],
+  "env": { "BTIA_WATCH_ALLOWED_TARGETS": "192.0.2.10" }
 }
 ```
 
