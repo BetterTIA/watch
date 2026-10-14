@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <OutputType>Exe</OutputType>
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <RootNamespace>BtiaWatch</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.10" />
+    <PackageReference Include="ModelContextProtocol" Version="2.2.0" />
+    <PackageReference Include="Siemens.Collaboration.Net.TiaPortal.Openness.Resolver" Version="2.0.1765367256" />
+    <PackageReference Include="Siemens.Collaboration.Net.TiaPortal.Packages.Openness" Version="21.0.1765349347" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+</Project>
