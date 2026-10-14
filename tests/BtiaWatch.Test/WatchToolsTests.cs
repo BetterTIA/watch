@@ -40,8 +40,17 @@ namespace BtiaWatch.Test
             {
                 throw new ArgumentException($"Data block '{dbName}' not found.");
             }
-            return $"<Snapshot Name=\"{dbName}\" />";
+            return SnapshotXml(dbName, $"<Value Path=\"Speed\" Type=\"Int\">{dbName.Length}</Value>");
         }
+
+        /// <summary>Shape of a V21 InterfaceSnapshot export with ExportOptions.WithReadOnly (live test).</summary>
+        public static string SnapshotXml(string dbName, string values) =>
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?><Document><Engineering version=\"V21\" />" +
+            $"<SW.Blocks.InterfaceSnapshot ID=\"0\"><AttributeList><Name>{dbName}</Name>" +
+            "<Snapshot ReadOnly=\"true\"><SnapshotValues xmlns=\"http://www.siemens.com/automation/Openness/SW/Interface/Snapshot/v1\">" +
+            values +
+            "</SnapshotValues></Snapshot><SnapshotDate ReadOnly=\"true\">2026-10-14T11:54:03Z</SnapshotDate>" +
+            "</AttributeList></SW.Blocks.InterfaceSnapshot></Document>";
 
         public IntPtr ShowInEditor(int? portalId, string? plc, WatchTarget target, string name)
         {
@@ -183,7 +192,39 @@ namespace BtiaWatch.Test
 
             CollectionAssert.AreEqual(new[] { "state ", "snapshot Data_A", "snapshot Data_B" }, _fake.Calls);
             StringAssert.Contains(text, "=== Data_A ===");
-            StringAssert.Contains(text, "<Snapshot Name=\"Data_B\" />");
+            StringAssert.Contains(text, "=== Data_B ===" + Environment.NewLine + "Snapshot taken: 2026-10-14T11:54:03Z" + Environment.NewLine + "Speed = 6 (Int)");
+        }
+
+        [TestMethod]
+        public void FormatSnapshot_WritesPathValueTypeLines()
+        {
+            var xml = FakePortal.SnapshotXml("Data_A",
+                "<Value Path=\"Mode\" Type=\"Int\">3</Value>" +
+                "<Value Path=\"Station[2].Hmi.Req\" Type=\"Bool\">FALSE</Value>" +
+                "<Value Path=\"Status\" Type=\"Word\">16#8000</Value>");
+
+            var lines = WatchTools.FormatSnapshot(xml).Split(new[] { Environment.NewLine }, StringSplitOptions.None);
+
+            CollectionAssert.AreEqual(new[]
+            {
+                "Snapshot taken: 2026-10-14T11:54:03Z",
+                "Mode = 3 (Int)",
+                "Station[2].Hmi.Req = FALSE (Bool)",
+                "Status = 16#8000 (Word)"
+            }, lines);
+        }
+
+        [TestMethod]
+        public void FormatSnapshot_ExportWithoutValues_ReturnsRawXml()
+        {
+            // What ExportOptions.None gave: the name only.
+            const string xml = "<Document><SW.Blocks.InterfaceSnapshot ID=\"0\"><AttributeList><Name>Data_A</Name></AttributeList></SW.Blocks.InterfaceSnapshot></Document>";
+
+            var text = WatchTools.FormatSnapshot(xml);
+
+            StringAssert.StartsWith(text, "No snapshot values");
+            StringAssert.Contains(text, xml);
+            Assert.AreEqual("not xml", WatchTools.FormatSnapshot("not xml"));
         }
 
         [TestMethod]

@@ -16,6 +16,13 @@
   about 0.5-0.8 s) and sends Ctrl+T only when it does not; after the wait it reads the state again and warns when
   monitoring is still off. When the button cannot be found, Ctrl+T is sent once with a warning, as before.
 
+### Fixed
+
+- `watch_db` returned only the block name: the values sit in the read-only `Snapshot` attribute, which
+  `InterfaceSnapshot.Export` leaves out unless `ExportOptions.WithReadOnly` is set (verified online, V21). The tool now
+  returns `Snapshot taken: <time>` and one `path = value (type)` line per member (`A.B[2].C`); an export without
+  values is returned raw.
+
 ### Added
 
 - Skeleton of the MCP server (stdio, .NET Framework 4.8, TIA Portal Openness V21) with three read-only tools:

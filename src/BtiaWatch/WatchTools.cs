@@ -6,6 +6,8 @@ using System.ComponentModel;
 using System.Linq;
 using System.Text;
 using System.Threading;
+using System.Xml;
+using System.Xml.Linq;
 
 namespace BtiaWatch
 {
@@ -86,7 +88,7 @@ namespace BtiaWatch
         }
 
         [McpServerTool(Name = "watch_db", Title = "Actual values of data blocks", ReadOnly = true, Destructive = false, OpenWorld = false),
-         Description("Read the actual values of one or more data blocks: takes a snapshot of each (ValueService.CreateSnapshot) and returns its SimaticML export as text. The PLC must be online (watch_online); offline the snapshot would silently stay empty, so the call is refused. The snapshot is stored in the offline project, which TIA Portal then shows as changed. Fail-safe data blocks are refused.")]
+         Description("Read the actual values of one or more data blocks: takes a snapshot of each (ValueService.CreateSnapshot) and returns its values as 'path = value (type)' lines, nested members as 'A.B[2].C'. The PLC must be online (watch_online); offline the snapshot would silently stay empty, so the call is refused. The snapshot is stored in the offline project, which TIA Portal then shows as changed. Fail-safe data blocks are refused.")]
         public static CallToolResult WatchDb(
             [Description("dbNames: data block names, separated by commas")] string dbNames,
             [Description("plc: name of the PLC software. Leave empty when the project has one PLC")] string? plc = null,
@@ -107,12 +109,11 @@ namespace BtiaWatch
                     throw new InvalidOperationException($"The PLC is '{state}', not online; an offline snapshot holds no values. Go online with watch_online first.");
                 }
 
-                // shortcut: export passed through as text; parse into name/value rows once an online test shows the format.
                 var sb = new StringBuilder();
                 foreach (var name in names)
                 {
                     sb.AppendLine($"=== {name} ===");
-                    sb.AppendLine(Tia.ExportDbSnapshot(portalId, plc, name));
+                    sb.AppendLine(FormatSnapshot(Tia.ExportDbSnapshot(portalId, plc, name)));
                 }
                 return Text(sb.ToString());
             });
@@ -203,6 +204,38 @@ namespace BtiaWatch
             false => " Warning: monitoring reads as off; the capture may show no monitor values.",
             null => " Warning: the monitoring state could not be read after the wait."
         };
+
+        /// <summary>
+        /// Turns the snapshot export into "path = value (type)" lines; the export already writes paths as
+        /// 'A.B[2].C' (SW.Interface.Snapshot.xsd). An export without a 'Snapshot' attribute is returned raw.
+        /// </summary>
+        internal static string FormatSnapshot(string xml)
+        {
+            XDocument doc;
+            try
+            {
+                doc = XDocument.Parse(xml);
+            }
+            catch (XmlException)
+            {
+                return xml;
+            }
+
+            var attributes = doc.Descendants("AttributeList").FirstOrDefault();
+            var snapshot = attributes?.Element("Snapshot");
+            if (snapshot == null)
+            {
+                return "No snapshot values in the export:\n" + xml;
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"Snapshot taken: {attributes!.Element("SnapshotDate")?.Value ?? "unknown"}");
+            foreach (var value in snapshot.Descendants().Where(e => e.Name.LocalName == "Value"))
+            {
+                sb.AppendLine($"{(string?)value.Attribute("Path")} = {value.Value} ({(string?)value.Attribute("Type")})");
+            }
+            return sb.ToString().TrimEnd();
+        }
 
         internal static WatchTarget ParseTarget(string kind) => kind.Trim().ToLowerInvariant() switch
         {

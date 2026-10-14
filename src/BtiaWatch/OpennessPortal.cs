@@ -88,7 +88,8 @@ namespace BtiaWatch
                 var file = new FileInfo(Path.Combine(Path.GetTempPath(), $"btia-watch-{Guid.NewGuid():N}.xml"));
                 try
                 {
-                    snapshot.Export(file, ExportOptions.None);
+                    // The values sit in the read-only attribute 'Snapshot'; ExportOptions.None leaves it out (live test, V21).
+                    snapshot.Export(file, ExportOptions.WithReadOnly);
                     return File.ReadAllText(file.FullName);
                 }
                 finally
