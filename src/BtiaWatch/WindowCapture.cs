@@ -178,12 +178,13 @@ namespace BtiaWatch
     /// <summary>
     /// Reads whether the visible editor monitors, from the pressed state of its "Monitor" toolbar button.
     /// TIA Portal draws its toolbars itself; UI Automation shows no buttons there, MSAA (oleacc) does:
-    /// role check button, name e.g. "InterfaceEditor.Monitor_ICO_PE_TbMonitor", state bit CHECKED while monitoring (spike, V21).
+    /// name e.g. "InterfaceEditor.Monitor_ICO_PE_TbMonitor"; monitoring = role check button with state bit CHECKED,
+    /// off = TIA swaps the role to push button (spike, V21).
     /// Read-only: only asks for names, roles and states.
     /// </summary>
     public static class MonitorButton
     {
-        private const int RoleToolbar = 22, RoleCheckButton = 44, StateChecked = 0x10;
+        private const int RoleToolbar = 22, RolePushButton = 43, RoleCheckButton = 44, StateChecked = 0x10;
         private const uint ObjidClient = 0xFFFFFFFC;
 
         // shortcut: floating (undocked) editors are separate top-level windows and are not searched; add them when someone undocks.
@@ -202,9 +203,11 @@ namespace BtiaWatch
                 {
                     var (owner, id) = kid is IAccessible element ? (element, (object)0) : (toolbar, kid);
                     var name = Safe(() => owner.get_accName(id)) ?? string.Empty;
-                    if (Role(owner, id) == RoleCheckButton && name.IndexOf("Monitor", StringComparison.OrdinalIgnoreCase) >= 0)
+                    var role = Role(owner, id);
+                    // Suffix, not substring: the neighbouring "..._TbMonitorOnce" button must not count.
+                    if ((role == RoleCheckButton || role == RolePushButton) && name.EndsWith("_TbMonitor", StringComparison.OrdinalIgnoreCase))
                     {
-                        states.Add((State(owner, id) & StateChecked) != 0);
+                        states.Add(role == RoleCheckButton && (State(owner, id) & StateChecked) != 0);
                     }
                 }
                 return true;

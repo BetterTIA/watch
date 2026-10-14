@@ -18,6 +18,7 @@
 
 ### Fixed
 
+- The monitoring state is read correctly when monitoring is off: TIA then turns the toolbar button into a push button instead of clearing CHECKED.
 - `watch_screen` read the monitoring state once, right after `ShowInEditor()`, before TIA Portal had drawn the editor's
   toolbar, so it got no answer and sent Ctrl+T blind (live, V21). It now retries the read every 200 ms until it
   answers, for at most `settleMs`, before deciding on Ctrl+T, and again after Ctrl+T; `settleMs` is the bound because
