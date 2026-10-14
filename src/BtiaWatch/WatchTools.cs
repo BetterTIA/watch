@@ -119,7 +119,7 @@ namespace BtiaWatch
         }
 
         [McpServerTool(Name = "watch_screen", Title = "Screenshot of a monitored editor", ReadOnly = true, Destructive = false, OpenWorld = false),
-         Description("Open a watch table, tag table or block in TIA Portal (ShowInEditor), switch on monitoring with Ctrl+T and return a PNG capture of the TIA Portal window. Ctrl+T is only sent when the PLC is online over a connection this server opened with watch_online goOnline; otherwise the capture shows the editor without monitoring. Ctrl+T toggles monitoring, so if it was already on, this call switches it off.")]
+         Description("Open a watch table, tag table or block in TIA Portal (ShowInEditor), switch on monitoring with Ctrl+T and return a PNG capture of the TIA Portal window. Ctrl+T is only sent when the PLC is online over a connection this server opened with watch_online goOnline; otherwise the capture shows the editor without monitoring. Ctrl+T toggles monitoring, so it is not sent when the editor's Monitor button reads as already on; when that state cannot be read, it is sent once with a warning.")]
         public static CallToolResult WatchScreen(
             [Description("name: name of the watch table, tag table or block")] string name,
             [Description("kind: 'watchTable' (default), 'tagTable' or 'block'")] string kind = "watchTable",
@@ -155,6 +155,14 @@ namespace BtiaWatch
                     return Image(kind, name, reason, Windows.Capture(hwnd));
                 }
 
+                // Ctrl+T toggles, so it is only sent when monitoring is not already on.
+                var wasOn = Windows.IsMonitoring(hwnd);
+                if (wasOn == true)
+                {
+                    Thread.Sleep(settleMs);
+                    return Image(kind, name, "Monitoring was already on; Ctrl+T not sent." + MonitoringNote(hwnd), Windows.Capture(hwnd));
+                }
+
                 var before = Windows.OtherWindowsOfProcess(hwnd);
                 var previous = Windows.Foreground();
                 try
@@ -174,9 +182,10 @@ namespace BtiaWatch
                             (closed ? "it was closed with Esc." : "it could not be closed, check TIA Portal.") + " Nothing was captured.");
                     }
 
-                    return Image(kind, name,
-                        "Sent Ctrl+T (Monitor all). Warning: Ctrl+T toggles monitoring and the server cannot tell whether it was already on; if the capture shows no monitor values, it was switched off.",
-                        Windows.Capture(hwnd));
+                    var note = wasOn == null
+                        ? "Sent Ctrl+T (Monitor all). Warning: the monitoring state could not be read and Ctrl+T toggles monitoring; if the capture shows no monitor values, it was switched off."
+                        : "Sent Ctrl+T (Monitor all)." + MonitoringNote(hwnd);
+                    return Image(kind, name, note, Windows.Capture(hwnd));
                 }
                 finally
                 {
@@ -187,6 +196,13 @@ namespace BtiaWatch
                 }
             });
         }
+
+        private static string MonitoringNote(IntPtr hwnd) => Windows.IsMonitoring(hwnd) switch
+        {
+            true => " Monitoring is on.",
+            false => " Warning: monitoring reads as off; the capture may show no monitor values.",
+            null => " Warning: the monitoring state could not be read after the wait."
+        };
 
         internal static WatchTarget ParseTarget(string kind) => kind.Trim().ToLowerInvariant() switch
         {

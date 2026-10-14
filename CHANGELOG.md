@@ -12,6 +12,9 @@
   once per call; `monitorShortcut` is replaced by `sendShortcut` (default true). Restores a minimized window, gives the
   focus back after the capture, closes a new TIA Portal dialog with Esc and fails. Default wait 3000 ms.
 - Source guard also rejects the parameterless `GoOnline()`.
+- `watch_screen` reads whether the editor already monitors (pressed state of its "Monitor" toolbar button over MSAA,
+  about 0.5-0.8 s) and sends Ctrl+T only when it does not; after the wait it reads the state again and warns when
+  monitoring is still off. When the button cannot be found, Ctrl+T is sent once with a warning, as before.
 
 ### Added
 

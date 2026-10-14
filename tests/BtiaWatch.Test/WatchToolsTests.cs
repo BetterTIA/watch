@@ -59,6 +59,10 @@ namespace BtiaWatch.Test
         public bool DialogAfterShortcut;
         public bool ShortcutSent;
         public byte[] Png = { 0x89, 0x50, 0x4E, 0x47 };
+        /// <summary>What the Monitor button reads before and after Ctrl+T; null = not found (the default).</summary>
+        public bool? MonitoringBefore, MonitoringAfter;
+
+        public bool? IsMonitoring(IntPtr hwnd) => ShortcutSent ? MonitoringAfter : MonitoringBefore;
 
         public byte[] Capture(IntPtr hwnd) { Log.Add($"capture {hwnd}"); return Png; }
         public void Restore(IntPtr hwnd) => Log.Add($"restore {hwnd}");
@@ -208,6 +212,59 @@ namespace BtiaWatch.Test
             var image = result.Content.OfType<ImageContentBlock>().Single();
             Assert.AreEqual("image/png", image.MimeType);
             CollectionAssert.AreEqual(_windows.Png, image.DecodedData.ToArray());
+        }
+
+        [TestMethod]
+        public void WatchScreen_MonitoringAlreadyOn_SendsNoShortcut()
+        {
+            GoOnlineByTool();
+            _windows.MonitoringBefore = true;
+
+            var result = WatchTools.WatchScreen("Watch_1", settleMs: 0);
+
+            Assert.IsFalse(result.IsError == true, TextOf(result));
+            Assert.IsFalse(_windows.ShortcutSent);
+            StringAssert.Contains(TextOf(result), "already on");
+            StringAssert.Contains(TextOf(result), "Monitoring is on.");
+            Assert.AreEqual(1, result.Content.OfType<ImageContentBlock>().Count());
+        }
+
+        [TestMethod]
+        public void WatchScreen_MonitoringOff_SendsCtrlTAndConfirmsItIsOn()
+        {
+            GoOnlineByTool();
+            _windows.MonitoringBefore = false;
+            _windows.MonitoringAfter = true;
+
+            var text = TextOf(WatchTools.WatchScreen("Watch_1", settleMs: 0));
+
+            Assert.AreEqual(1, _windows.Log.Count(l => l.StartsWith("ctrl+t")));
+            StringAssert.Contains(text, "Monitoring is on.");
+            Assert.IsFalse(text.Contains("Warning"), text);
+        }
+
+        [TestMethod]
+        public void WatchScreen_MonitoringStillOffAfterCtrlT_Warns()
+        {
+            GoOnlineByTool();
+            _windows.MonitoringBefore = false;
+            _windows.MonitoringAfter = false;
+
+            var text = TextOf(WatchTools.WatchScreen("Watch_1", settleMs: 0));
+
+            Assert.AreEqual(1, _windows.Log.Count(l => l.StartsWith("ctrl+t")));
+            StringAssert.Contains(text, "reads as off");
+        }
+
+        [TestMethod]
+        public void WatchScreen_MonitoringStateUnreadable_SendsCtrlTOnceWithWarning()
+        {
+            GoOnlineByTool();
+
+            var text = TextOf(WatchTools.WatchScreen("Watch_1", settleMs: 0));
+
+            Assert.AreEqual(1, _windows.Log.Count(l => l.StartsWith("ctrl+t")));
+            StringAssert.Contains(text, "could not be read");
         }
 
         [TestMethod]
