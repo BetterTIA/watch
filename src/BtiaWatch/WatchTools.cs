@@ -37,7 +37,7 @@ namespace BtiaWatch
         private static IWatchPortal Tia => Portal ?? throw new InvalidOperationException("No TIA Portal connection layer is configured.");
 
         [McpServerTool(Name = "watch_online", Title = "PLC online state", ReadOnly = true, Destructive = false, OpenWorld = false),
-         Description("Return the online state of a PLC (OnlineProvider.State). With action 'goOnline' it first opens the TIA Portal online connection to 'target' over 'pcInterface'; the target must be in the server's allowed list (environment variable " + AllowedTargetsVariable + "), otherwise goOnline is refused. 'goOffline' closes the connection. Nothing is changed in the PLC.")]
+         Description("Return the online state of a PLC (OnlineProvider.State). With action 'goOnline' it first opens the TIA Portal online connection to 'target' over 'pcInterface'; the target must be in the server's allowed list (environment variable " + AllowedTargetsVariable + "), otherwise goOnline is refused. If the PLC is already online, goOnline adopts that connection instead of opening a new one. 'goOffline' closes the connection. Nothing is changed in the PLC.")]
         public static CallToolResult WatchOnline(
             [Description("plc: name of the PLC software. Leave empty when the project has one PLC")] string? plc = null,
             [Description("action: 'state' (default), 'goOnline' or 'goOffline'")] string action = "state",
@@ -69,6 +69,16 @@ namespace BtiaWatch
                         if (string.IsNullOrWhiteSpace(pcInterface))
                         {
                             throw new ArgumentException("pcInterface is empty; pass the PG/PC interface to connect over.");
+                        }
+                        // Already online (e.g. after a server restart): GoOnline would throw, so adopt the connection. The Ctrl+T
+                        // guard protects against the Go online dialog in an offline editor, which cannot appear when Online, and an
+                        // explicit call with an allowed target is the operator's consent.
+                        // shortcut: Openness V21 cannot read the address the connection uses, so it is not compared with target.
+                        if (Tia.GetOnlineState(portalId, plc) == "Online")
+                        {
+                            OpenedByTool.Add(key);
+                            state = $"Online (already online; connection adopted for {address})";
+                            break;
                         }
                         state = Tia.GoOnline(portalId, plc, pcInterface!.Trim(), address);
                         if (state == "Online")

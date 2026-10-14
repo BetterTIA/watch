@@ -133,7 +133,33 @@ namespace BtiaWatch.Test
         {
             Assert.AreEqual("State: Online", TextOf(WatchTools.WatchOnline(action: "goOnline", target: " 192.0.2.11 ", pcInterface: "PLCSIM")));
             Assert.AreEqual("State: Offline", TextOf(WatchTools.WatchOnline(action: "goOffline")));
-            CollectionAssert.AreEqual(new[] { "online PLCSIM 192.0.2.11", "offline" }, _fake.Calls);
+            CollectionAssert.AreEqual(new[] { "state ", "online PLCSIM 192.0.2.11", "offline" }, _fake.Calls);
+        }
+
+        [TestMethod]
+        public void WatchOnline_AlreadyOnlineAllowedTarget_AdoptsAndAllowsShortcut()
+        {
+            _fake.State = "Online";
+
+            var result = WatchTools.WatchOnline(action: "goOnline", target: "192.0.2.10", pcInterface: "PLCSIM");
+
+            Assert.IsFalse(result.IsError == true);
+            Assert.AreEqual("State: Online (already online; connection adopted for 192.0.2.10)", TextOf(result));
+            Assert.IsFalse(_fake.Calls.Any(c => c.StartsWith("online")));
+            WatchTools.WatchScreen("Tags_1", "tagTable", settleMs: 0);
+            Assert.IsTrue(_windows.ShortcutSent);
+        }
+
+        [TestMethod]
+        public void WatchOnline_AlreadyOnlineTargetOutsideList_IsRefused()
+        {
+            _fake.State = "Online";
+
+            var result = WatchTools.WatchOnline(action: "goOnline", target: "192.0.2.99", pcInterface: "PLCSIM");
+
+            Assert.IsTrue(result.IsError == true);
+            Assert.AreEqual(0, WatchTools.OpenedByTool.Count);
+            Assert.AreEqual(0, _fake.Calls.Count);
         }
 
         [TestMethod]

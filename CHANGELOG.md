@@ -18,6 +18,13 @@
 
 ### Fixed
 
+- `watch_online goOnline` failed with "Error when calling method 'GoOnline'" when TIA Portal was still online from an
+  earlier server process, and `watch_screen` then refused Ctrl+T. When the PLC is already `Online`, goOnline now checks
+  the target against the allowed list as before, skips `GoOnline()`, adopts the connection as opened by this server and
+  returns `State: Online (already online; connection adopted for <target>)` (0.1.3). Limitation: Openness V21 does not
+  expose the address an open connection uses (`OnlineProvider.Configuration` only lists modes, PC interfaces and
+  `IsConfigured`), so the adopted connection is not compared with `target`.
+
 - The monitoring state is read correctly when monitoring is off: TIA then turns the toolbar button into a push button instead of clearing CHECKED.
 - `watch_screen` read the monitoring state once, right after `ShowInEditor()`, before TIA Portal had drawn the editor's
   toolbar, so it got no answer and sent Ctrl+T blind (live, V21). It now retries the read every 200 ms until it
