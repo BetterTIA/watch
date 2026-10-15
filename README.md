@@ -4,7 +4,16 @@
 check the online state of a PLC, read the actual values of data blocks and look at a monitored watch table, tag table
 or block - without someone taking screenshots by hand.
 
-It is the fourth tool of the BetterTIA set, next to Reader, Writer and Editor.
+It is one of the four tools of the [BetterTIA](https://github.com/BetterTIA) set:
+
+| Tool | Role |
+|---|---|
+| [reader](https://github.com/BetterTIA/reader) | reads a TIA Portal project through Openness and exports it to a folder (read-only MCP server) |
+| [writer](https://github.com/BetterTIA/writer) | writes to a TIA Portal project through Openness (MCP server) |
+| [editor](https://github.com/BetterTIA/editor) | draws a network from the export, lets you compose a change and tracks it until it is in the project |
+| **watch** (this repository) | reads live values from the running PLC through TIA Portal (read-only MCP server) |
+
+All four are developed, used and tested only with TIA Portal V21.
 
 > Status: early (0.1.x). The tools are tested against a fake TIA Portal and were checked once against a real PLC
 > with TIA Portal V21 (see below).
