@@ -72,18 +72,34 @@ namespace BtiaWatch
                 var software = FindPlc(portalId, plc).Software;
                 // Technology objects (PID_Temp, PID_Compact, axes...) are instance DBs, but they live in the
                 // technology objects folder, not among the program blocks (V21: TechnologicalInstanceDB : InstanceDB).
-                var db = AllBlocks(software.BlockGroup).FirstOrDefault(b => b.Name == dbName) as DataBlock
-                    ?? AllTechnologicalObjects(software.TechnologicalObjectGroup).FirstOrDefault(t => t.Name == dbName)
-                    ?? throw new ArgumentException($"Data block '{dbName}' not found among the program blocks or the technology objects.");
-
-                // F_DB and every other fail-safe language: the tool keeps away from the safety program.
-                if (db.ProgrammingLanguage.ToString().StartsWith("F_", StringComparison.Ordinal))
+                var db = AllBlocks(software.BlockGroup).FirstOrDefault(b => b.Name == dbName) as DataBlock;
+                var technologyObject = db == null
+                    ? AllTechnologicalObjects(software.TechnologicalObjectGroup).FirstOrDefault(t => t.Name == dbName)
+                    : null;
+                ValueService? values;
+                if (technologyObject != null)
                 {
-                    throw new InvalidOperationException($"'{dbName}' is a fail-safe data block; it is not read.");
+                    // TechnologicalInstanceDB refuses 'Interface' ("not supported by type", live test V21), and with it
+                    // the only Openness path to actual values; asking the object itself is the one remaining try.
+                    values = technologyObject.GetService<ValueService>()
+                        ?? throw new InvalidOperationException($"'{dbName}' is a technology object; Openness V21 offers no actual values for technology objects. " +
+                            "Use instead: a watch table with its members (e.g. \"" + dbName + "\".State), opened with watch_screen; " +
+                            "or the offline parameters with BTIA_Reader read_technology_object.");
+                    db = technologyObject;
                 }
+                else
+                {
+                    db = db ?? throw new ArgumentException($"Data block '{dbName}' not found among the program blocks or the technology objects.");
 
-                var values = db.Interface.GetService<ValueService>()
-                    ?? throw new InvalidOperationException($"'{dbName}' offers no value service.");
+                    // F_DB and every other fail-safe language: the tool keeps away from the safety program.
+                    if (db.ProgrammingLanguage.ToString().StartsWith("F_", StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException($"'{dbName}' is a fail-safe data block; it is not read.");
+                    }
+
+                    values = db.Interface.GetService<ValueService>()
+                        ?? throw new InvalidOperationException($"'{dbName}' offers no value service.");
+                }
                 // The snapshot service sits on the block itself; on the interface it is null (spike, V21).
                 var snapshot = db.GetService<InterfaceSnapshot>()
                     ?? throw new InvalidOperationException($"'{dbName}' offers no snapshot service.");

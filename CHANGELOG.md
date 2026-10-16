@@ -4,6 +4,11 @@
 
 ### Added
 
+- `watch_db` on a technology object: Openness V21 refuses `Interface` on `TechnologicalInstanceDB`
+  ("'Interface' is not supported by type", live test), which is the only way to `ValueService`. The call now asks the
+  object itself for `ValueService` and, when there is none, says that technology objects give no actual values and
+  points to a watch table with `watch_screen` or to BTIA_Reader `read_technology_object` (0.1.5).
+
 - `watch_db` reads technology objects (`PID_Temp`, `PID_Compact`, axes...): their instance DBs sit in the technology
   objects folder (`PlcSoftware.TechnologicalObjectGroup`), not among the program blocks, so they were reported as
   "not found". In Openness V21 `TechnologicalInstanceDB` derives from `InstanceDB`; the snapshot is taken the same way.
