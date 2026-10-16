@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- `watch_db` reads technology objects (`PID_Temp`, `PID_Compact`, axes...): their instance DBs sit in the technology
+  objects folder (`PlcSoftware.TechnologicalObjectGroup`), not among the program blocks, so they were reported as
+  "not found". In Openness V21 `TechnologicalInstanceDB` derives from `InstanceDB`; the snapshot is taken the same way.
+  Not yet checked against a PLC (0.1.4).
+- `watch_db` parameter `members`: comma-separated member paths; only members equal to a path or below it are
+  returned (case-insensitive, whole path segments: `A.B` matches `A.B.C` and `A.B[2]`, not `A.BC`), with a line
+  `Members: <shown> of <all>`. Without a match the top-level members are listed. Keeps snapshots of large instance
+  DBs with multi-instances short (0.1.4).
+
 ### Changed
 
 - `watch_online goOnline` connects only to an address listed in `BTIA_WATCH_ALLOWED_TARGETS`, over a named PG/PC

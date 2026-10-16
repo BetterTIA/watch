@@ -98,9 +98,10 @@ namespace BtiaWatch
         }
 
         [McpServerTool(Name = "watch_db", Title = "Actual values of data blocks", ReadOnly = true, Destructive = false, OpenWorld = false),
-         Description("Read the actual values of one or more data blocks: takes a snapshot of each (ValueService.CreateSnapshot) and returns, per block, 'Snapshot taken: <time>' and one 'path = value (type)' line per member, nested members as 'A.B[2].C'. The PLC must be online (watch_online); offline the snapshot would silently stay empty, so the call is refused. The snapshot is stored in the offline project, which TIA Portal then shows as changed. Fail-safe data blocks are refused.")]
+         Description("Read the actual values of one or more data blocks: takes a snapshot of each (ValueService.CreateSnapshot) and returns, per block, 'Snapshot taken: <time>' and one 'path = value (type)' line per member, nested members as 'A.B[2].C'. The PLC must be online (watch_online); offline the snapshot would silently stay empty, so the call is refused. The snapshot is stored in the offline project, which TIA Portal then shows as changed. Fail-safe data blocks are refused. Technology objects (PID_Temp, PID_Compact...) are read like any instance DB, by the name of the technology object. Large blocks (multi-instances) produce long answers; pass 'members' to keep only the members below the given paths.")]
         public static CallToolResult WatchDb(
-            [Description("dbNames: data block names, separated by commas")] string dbNames,
+            [Description("dbNames: data block or technology object names, separated by commas")] string dbNames,
+            [Description("members: optional member paths, separated by commas, e.g. 'State,Config.Input,Retain.CtrlParams' or 'Heater_1.PID'; keeps each member equal to a path or below it (case-insensitive). Applied to every block. Empty: all members")] string? members = null,
             [Description("plc: name of the PLC software. Leave empty when the project has one PLC")] string? plc = null,
             [Description("portalId: process id of the TIA Portal instance. Leave empty when only one is running")] int? portalId = null)
         {
@@ -119,11 +120,12 @@ namespace BtiaWatch
                     throw new InvalidOperationException($"The PLC is '{state}', not online; an offline snapshot holds no values. Go online with watch_online first.");
                 }
 
+                var filter = SplitNames(members ?? string.Empty);
                 var sb = new StringBuilder();
                 foreach (var name in names)
                 {
                     sb.AppendLine($"=== {name} ===");
-                    sb.AppendLine(FormatSnapshot(Tia.ExportDbSnapshot(portalId, plc, name)));
+                    sb.AppendLine(FormatSnapshot(Tia.ExportDbSnapshot(portalId, plc, name), filter));
                 }
                 return Text(sb.ToString());
             });
@@ -236,8 +238,9 @@ namespace BtiaWatch
         /// <summary>
         /// Turns the snapshot export into "path = value (type)" lines; the export already writes paths as
         /// 'A.B[2].C' (SW.Interface.Snapshot.xsd). An export without a 'Snapshot' attribute is returned raw.
+        /// With <paramref name="members"/>, only members equal to one of the paths or below it are written.
         /// </summary>
-        internal static string FormatSnapshot(string xml)
+        internal static string FormatSnapshot(string xml, IReadOnlyCollection<string>? members = null)
         {
             XDocument doc;
             try
@@ -256,13 +259,45 @@ namespace BtiaWatch
                 return "No snapshot values in the export:\n" + xml;
             }
 
+            var values = snapshot.Descendants().Where(e => e.Name.LocalName == "Value").ToList();
+            var shown = members == null || members.Count == 0
+                ? values
+                : values.Where(v => members.Any(m => IsAtOrBelow((string?)v.Attribute("Path") ?? string.Empty, m))).ToList();
+
             var sb = new StringBuilder();
             sb.AppendLine($"Snapshot taken: {attributes!.Element("SnapshotDate")?.Value ?? "unknown"}");
-            foreach (var value in snapshot.Descendants().Where(e => e.Name.LocalName == "Value"))
+            if (shown.Count < values.Count)
+            {
+                sb.AppendLine($"Members: {shown.Count} of {values.Count} (filter: {string.Join(", ", members!)})");
+            }
+            if (shown.Count == 0 && values.Count > 0)
+            {
+                // Help the caller correct the path without a second, unfiltered call.
+                var top = values.Select(v => TopLevel((string?)v.Attribute("Path") ?? string.Empty)).Distinct().ToList();
+                sb.AppendLine($"No member matches. Top-level members: {string.Join(", ", top.Take(50))}" + (top.Count > 50 ? $", ... ({top.Count})" : string.Empty));
+            }
+            foreach (var value in shown)
             {
                 sb.AppendLine($"{(string?)value.Attribute("Path")} = {value.Value} ({(string?)value.Attribute("Type")})");
             }
             return sb.ToString().TrimEnd();
+        }
+
+        /// <summary>True when path is the member itself or lies below it ('A.B' matches 'A.B', 'A.B.C' and 'A.B[1]', not 'A.BC').</summary>
+        internal static bool IsAtOrBelow(string path, string member)
+        {
+            member = member.Trim().TrimEnd('.');
+            if (member.Length == 0 || !path.StartsWith(member, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            return path.Length == member.Length || path[member.Length] == '.' || path[member.Length] == '[';
+        }
+
+        private static string TopLevel(string path)
+        {
+            var end = path.IndexOfAny(new[] { '.', '[' });
+            return end < 0 ? path : path.Substring(0, end);
         }
 
         internal static WatchTarget ParseTarget(string kind) => kind.Trim().ToLowerInvariant() switch

@@ -257,6 +257,66 @@ namespace BtiaWatch.Test
             Assert.AreEqual("not xml", WatchTools.FormatSnapshot("not xml"));
         }
 
+        private static string PidXml() => FakePortal.SnapshotXml("PID_Heater",
+            "<Value Path=\"State\" Type=\"Int\">3</Value>" +
+            "<Value Path=\"Config.InputUpperLimit\" Type=\"Real\">300.0</Value>" +
+            "<Value Path=\"Config.InputLowerLimit\" Type=\"Real\">0.0</Value>" +
+            "<Value Path=\"ConfigOld\" Type=\"Int\">1</Value>" +
+            "<Value Path=\"Retain.CtrlParams.Heat.Gain\" Type=\"Real\">2.5</Value>" +
+            "<Value Path=\"Zone[1].Sp\" Type=\"Real\">180.0</Value>" +
+            "<Value Path=\"Zone[10].Sp\" Type=\"Real\">190.0</Value>");
+
+        [TestMethod]
+        public void FormatSnapshot_MembersKeepsPathsAtOrBelowAndCounts()
+        {
+            var lines = WatchTools.FormatSnapshot(PidXml(), new[] { "state", "Config", "Retain.CtrlParams.", "Zone[1]" })
+                .Split(new[] { Environment.NewLine }, StringSplitOptions.None);
+
+            CollectionAssert.AreEqual(new[]
+            {
+                "Snapshot taken: 2026-10-14T11:54:03Z",
+                "Members: 5 of 7 (filter: state, Config, Retain.CtrlParams., Zone[1])",
+                "State = 3 (Int)",
+                "Config.InputUpperLimit = 300.0 (Real)",
+                "Config.InputLowerLimit = 0.0 (Real)",
+                "Retain.CtrlParams.Heat.Gain = 2.5 (Real)",
+                "Zone[1].Sp = 180.0 (Real)"
+            }, lines);
+        }
+
+        [TestMethod]
+        public void FormatSnapshot_MembersWithoutMatch_ListsTopLevelMembers()
+        {
+            var text = WatchTools.FormatSnapshot(PidXml(), new[] { "Sts" });
+
+            StringAssert.Contains(text, "Members: 0 of 7");
+            StringAssert.Contains(text, "No member matches. Top-level members: State, Config, ConfigOld, Retain, Zone");
+        }
+
+        [TestMethod]
+        public void IsAtOrBelow_MatchesWholeSegmentsOnly()
+        {
+            Assert.IsTrue(WatchTools.IsAtOrBelow("A.B", "A.B"));
+            Assert.IsTrue(WatchTools.IsAtOrBelow("A.B.C", "a.b"));
+            Assert.IsTrue(WatchTools.IsAtOrBelow("A.B[2].C", "A.B"));
+            Assert.IsFalse(WatchTools.IsAtOrBelow("A.BC", "A.B"));
+            Assert.IsFalse(WatchTools.IsAtOrBelow("A", "A.B"));
+            Assert.IsFalse(WatchTools.IsAtOrBelow("A", " "));
+        }
+
+        [TestMethod]
+        public void WatchDb_MembersFilterAppliesToEveryBlock()
+        {
+            _fake.State = "Online";
+
+            var text = TextOf(WatchTools.WatchDb("Data_A,Data_B", members: "Speed"));
+            var none = TextOf(WatchTools.WatchDb("Data_A", members: "Other"));
+
+            StringAssert.Contains(text, "=== Data_A ===" + Environment.NewLine + "Snapshot taken: 2026-10-14T11:54:03Z" + Environment.NewLine + "Speed = 6 (Int)");
+            StringAssert.Contains(text, "=== Data_B ===" + Environment.NewLine + "Snapshot taken: 2026-10-14T11:54:03Z" + Environment.NewLine + "Speed = 6 (Int)");
+            StringAssert.Contains(none, "No member matches. Top-level members: Speed");
+        }
+
         [TestMethod]
         public void WatchDb_PortalErrorBecomesToolError()
         {

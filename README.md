@@ -23,7 +23,7 @@ All four are developed, used and tested only with TIA Portal V21.
 | Tool | What it does | Source |
 | --- | --- | --- |
 | `watch_online` | Online state of a PLC (`OnlineProvider.State`); `action` `goOnline` connects to an allowed `target` address over a named `pcInterface` (or adopts a connection that is already online), `goOffline` disconnects | Openness |
-| `watch_db` | Actual values of one or more data blocks: `ValueService.CreateSnapshot()`, then `InterfaceSnapshot.Export()` with read-only attributes; returns the snapshot time and one `path = value (type)` line per member. Requires the PLC to be online | Openness |
+| `watch_db` | Actual values of one or more data blocks: `ValueService.CreateSnapshot()`, then `InterfaceSnapshot.Export()` with read-only attributes; returns the snapshot time and one `path = value (type)` line per member. Technology objects (`PID_Temp`, `PID_Compact`, ...) are found by name like data blocks; `members` keeps only the members at or below the given paths (e.g. `State,Config.Input`). Requires the PLC to be online | Openness |
 | `watch_screen` | Opens a watch table, tag table or block (`ShowInEditor()`), sends Ctrl+T ("Monitor all") when allowed, and returns a PNG capture of the TIA Portal window (`PrintWindow`) as MCP image content | Openness + Win32 |
 
 Common parameters: `plc` (PLC software name, optional when the project has one PLC) and `portalId` (process id,
@@ -74,7 +74,7 @@ connection, `watch_db` values of global DBs with structures and arrays, `watch_s
 and a LAD block (monitoring state read, Ctrl+T sent only when off), `goOffline`. Call the tools one after another:
 two concurrent `watch_screen` calls fight over the active editor.
 
-Not yet checked: instance DBs of GRAPH blocks, technology objects, very large DBs, floating editors, other monitors
+Not yet checked: instance DBs of GRAPH blocks, technology objects (0.1.4, tested against the fake only), very large DBs, floating editors, other monitors
 and DPI scaling.
 
 ## Requirements
@@ -97,13 +97,13 @@ tested on a window of the test process.
 ## Register in Claude Code
 
 A running server locks its `.exe`, so build a copy per version and point the client at that copy, e.g.
-`dotnet build src\BtiaWatch -c Release -o dist\0.1.3` (`dist/` is ignored by git). Add the server to `.mcp.json`
+`dotnet build src\BtiaWatch -c Release -o dist\0.1.4` (`dist/` is ignored by git). Add the server to `.mcp.json`
 under the key `BTIA_Watch`:
 
 ```json
 "BTIA_Watch": {
   "type": "stdio",
-  "command": "<repository>\\dist\\0.1.3\\BtiaWatch.exe",
+  "command": "<repository>\\dist\\0.1.4\\BtiaWatch.exe",
   "args": [],
   "env": { "BTIA_WATCH_ALLOWED_TARGETS": "192.0.2.10" }
 }

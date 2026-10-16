@@ -7,6 +7,7 @@ using Siemens.Engineering.SW;
 using Siemens.Engineering.SW.Blocks;
 using Siemens.Engineering.SW.Blocks.Interface;
 using Siemens.Engineering.SW.Tags;
+using Siemens.Engineering.SW.TechnologicalObjects;
 using Siemens.Engineering.SW.WatchAndForceTables;
 using System;
 using System.Collections.Generic;
@@ -69,8 +70,11 @@ namespace BtiaWatch
             lock (_lock)
             {
                 var software = FindPlc(portalId, plc).Software;
+                // Technology objects (PID_Temp, PID_Compact, axes...) are instance DBs, but they live in the
+                // technology objects folder, not among the program blocks (V21: TechnologicalInstanceDB : InstanceDB).
                 var db = AllBlocks(software.BlockGroup).FirstOrDefault(b => b.Name == dbName) as DataBlock
-                    ?? throw new ArgumentException($"Data block '{dbName}' not found.");
+                    ?? AllTechnologicalObjects(software.TechnologicalObjectGroup).FirstOrDefault(t => t.Name == dbName)
+                    ?? throw new ArgumentException($"Data block '{dbName}' not found among the program blocks or the technology objects.");
 
                 // F_DB and every other fail-safe language: the tool keeps away from the safety program.
                 if (db.ProgrammingLanguage.ToString().StartsWith("F_", StringComparison.Ordinal))
@@ -229,6 +233,9 @@ namespace BtiaWatch
 
         private static IEnumerable<PlcBlock> AllBlocks(PlcBlockUserGroup group) =>
             group.Blocks.Concat(group.Groups.SelectMany(AllBlocks));
+
+        private static IEnumerable<TechnologicalInstanceDB> AllTechnologicalObjects(TechnologicalInstanceDBGroup group) =>
+            group.TechnologicalObjects.Concat(group.Groups.SelectMany(AllTechnologicalObjects));
 
         private static IEnumerable<PlcTagTable> AllTagTables(PlcTagTableSystemGroup group) =>
             group.TagTables.Concat(group.Groups.SelectMany(AllTagTables));
