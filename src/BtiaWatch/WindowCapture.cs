@@ -106,6 +106,26 @@ namespace BtiaWatch
             return found;
         }
 
+        /// <summary>
+        /// A visible top-level window of the TIA Portal process, other than the main window, whose title contains
+        /// <paramref name="name"/> (an undocked editor); Zero when there is none or the match is ambiguous.
+        /// </summary>
+        public static IntPtr FindFloatingEditor(IntPtr main, string name)
+        {
+            var hits = OtherWindowsOfProcess(main).Where(w => Title(w).IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+            return hits.Count == 1 ? hits[0] : IntPtr.Zero;
+        }
+
+        private static string Title(IntPtr hwnd)
+        {
+            var sb = new System.Text.StringBuilder(512);
+            GetWindowText(hwnd, sb, sb.Capacity);
+            return sb.ToString();
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetWindowText(IntPtr hwnd, System.Text.StringBuilder text, int max);
+
         private static Input Key(ushort vk, bool up) => new() { Type = 1, Vk = vk, Flags = up ? 2u : 0u };
 
         // INPUT with its keyboard member, laid out for 64-bit processes only (both projects build x64).
@@ -187,7 +207,7 @@ namespace BtiaWatch
         private const int RoleToolbar = 22, RolePushButton = 43, RoleCheckButton = 44, StateChecked = 0x10;
         private const uint ObjidClient = 0xFFFFFFFC;
 
-        // shortcut: floating (undocked) editors are separate top-level windows and are not searched; add them when someone undocks.
+        // Floating editors are found by title in WatchTools (FindFloatingEditor) and passed in as hwnd.
         /// <summary>True/false when every Monitor button found agrees; null when none is found or they disagree (split editor space).</summary>
         public static bool? IsChecked(IntPtr hwnd)
         {
@@ -291,6 +311,8 @@ namespace BtiaWatch
         IReadOnlyList<IntPtr> OtherWindowsOfProcess(IntPtr hwnd);
         /// <summary>Whether the visible editor monitors; null when that cannot be read.</summary>
         bool? IsMonitoring(IntPtr hwnd);
+        /// <summary>Window of an undocked editor whose title contains <paramref name="name"/>; Zero when none.</summary>
+        IntPtr FindFloatingEditor(IntPtr main, string name);
     }
 
     public sealed class Win32Windows : IWindowOps
@@ -303,5 +325,6 @@ namespace BtiaWatch
         public bool PressEscape(IntPtr hwnd) => WindowCapture.PressKeys(hwnd, WindowCapture.VkEscape);
         public IReadOnlyList<IntPtr> OtherWindowsOfProcess(IntPtr hwnd) => WindowCapture.OtherWindowsOfProcess(hwnd);
         public bool? IsMonitoring(IntPtr hwnd) => MonitorButton.IsChecked(hwnd);
+        public IntPtr FindFloatingEditor(IntPtr main, string name) => WindowCapture.FindFloatingEditor(main, name);
     }
 }

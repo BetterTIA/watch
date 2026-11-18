@@ -21,6 +21,9 @@ namespace BtiaWatch
         // Measured in the offline spike: editors open within about a second; monitor values need a little longer.
         public const int DefaultSettleMs = 3000;
 
+        /// <summary>Default and upper bound for the rows watch_db returns per block.</summary>
+        public const int DefaultMaxRows = 500, MaxRowsLimit = 20000;
+
         /// <summary>Comma-separated IP addresses watch_online may connect to; empty or unset disables goOnline.</summary>
         public const string AllowedTargetsVariable = "BTIA_WATCH_ALLOWED_TARGETS";
 
@@ -98,15 +101,17 @@ namespace BtiaWatch
         }
 
         [McpServerTool(Name = "watch_db", Title = "Actual values of data blocks", ReadOnly = true, Destructive = false, OpenWorld = false),
-         Description("Read the actual values of one or more data blocks: takes a snapshot of each (ValueService.CreateSnapshot) and returns, per block, 'Snapshot taken: <time>' and one 'path = value (type)' line per member, nested members as 'A.B[2].C'. The PLC must be online (watch_online); offline the snapshot would silently stay empty, so the call is refused. The snapshot is stored in the offline project, which TIA Portal then shows as changed. Fail-safe data blocks are refused. Technology objects (PID_Temp, PID_Compact...) are found by name, but Openness V21 gives no actual values for them: the call then says so and points to a watch table with watch_screen, or to BTIA_Reader read_technology_object for the offline parameters. Large blocks (multi-instances) produce long answers; pass 'members' to keep only the members below the given paths.")]
+         Description("Read the actual values of one or more data blocks: takes a snapshot of each (ValueService.CreateSnapshot) and returns, per block, 'Snapshot taken: <time>' and one 'path = value (type)' line per member, nested members as 'A.B[2].C'. The PLC must be online (watch_online); offline the snapshot would silently stay empty, so the call is refused. The snapshot is stored in the offline project, which TIA Portal then shows as changed. Fail-safe data blocks are refused. Technology objects (PID_Temp, PID_Compact...) are found by name, but Openness V21 gives no actual values for them: the call then says so and points to a watch table with watch_screen, or to BTIA_Reader read_technology_object for the offline parameters. Section headers are left out. At most 'maxRows' rows (default 500) are returned per block; a longer block is cut with 'truncated: true' and the number of rows left out, so pass 'members' to keep only the members below the given paths. The answer says when the project is marked as modified ('projectMarkedModified'); the snapshot is the likely cause and nothing is saved.")]
         public static CallToolResult WatchDb(
             [Description("dbNames: data block or technology object names, separated by commas")] string dbNames,
             [Description("members: optional member paths, separated by commas, e.g. 'State,Config.Input,Retain.CtrlParams' or 'Heater_1.PID'; keeps each member equal to a path or below it (case-insensitive). Applied to every block. Empty: all members")] string? members = null,
             [Description("plc: name of the PLC software. Leave empty when the project has one PLC")] string? plc = null,
-            [Description("portalId: process id of the TIA Portal instance. Leave empty when only one is running")] int? portalId = null)
+            [Description("portalId: process id of the TIA Portal instance. Leave empty when only one is running")] int? portalId = null,
+            [Description("maxRows: most rows returned per block, 1 to 20000. Default 500")] int maxRows = DefaultMaxRows)
         {
             return Run(() =>
             {
+                maxRows = Math.Max(1, Math.Min(maxRows, MaxRowsLimit));
                 var names = SplitNames(dbNames);
                 if (names.Count == 0)
                 {
@@ -121,12 +126,18 @@ namespace BtiaWatch
                 }
 
                 var filter = SplitNames(members ?? string.Empty);
+                var modifiedBefore = Tia.IsProjectModified(portalId);
                 var sb = new StringBuilder();
                 foreach (var name in names)
                 {
                     sb.AppendLine($"=== {name} ===");
-                    sb.AppendLine(FormatSnapshot(Tia.ExportDbSnapshot(portalId, plc, name), filter));
+                    sb.AppendLine(FormatSnapshot(Tia.ExportDbSnapshot(portalId, plc, name), filter, maxRows));
                 }
+                // The snapshot lives in the offline project and Openness has no way to undo it; only say so, never save.
+                var modifiedAfter = Tia.IsProjectModified(portalId);
+                sb.AppendLine(modifiedAfter == true
+                    ? "projectMarkedModified: true" + (modifiedBefore == true ? " (it was already marked as modified before this call)" : " (set by the snapshot; the project was not saved)")
+                    : "projectMarkedModified: " + (modifiedAfter == false ? "false" : "unknown"));
                 return Text(sb.ToString());
             });
         }
@@ -153,17 +164,25 @@ namespace BtiaWatch
                     OpenedByTool.Remove(key);
                 }
 
-                var hwnd = Tia.ShowInEditor(portalId, plc, target, name);
-                Windows.Restore(hwnd);
+                var main = Tia.ShowInEditor(portalId, plc, target, name);
+                Windows.Restore(main);
+                // An undocked editor is a top-level window of its own; use it for the capture, the Monitor button and Ctrl+T.
+                var floating = Windows.FindFloatingEditor(main, name);
+                var hwnd = floating != IntPtr.Zero ? floating : main;
+                if (hwnd != main)
+                {
+                    Windows.Restore(hwnd);
+                }
+                var where = hwnd != main ? "Floating editor window used. " : string.Empty;
 
                 if (!sendShortcut || !OpenedByTool.Contains(key))
                 {
                     // Offline, Ctrl+T makes TIA Portal connect on its own over the last used interface (spike, V21).
-                    var reason = !sendShortcut
+                    var reason = where + (!sendShortcut
                         ? "No monitoring shortcut sent (sendShortcut=false)."
                         : $"Monitoring shortcut NOT sent: the PLC is '{state}'" +
                           (state == "Online" ? ", but the connection was not opened by this server" : string.Empty) +
-                          ". Ctrl+T is only sent over a connection opened with watch_online goOnline; the capture shows no monitor values.";
+                          ". Ctrl+T is only sent over a connection opened with watch_online goOnline; the capture shows no monitor values.");
                     Thread.Sleep(settleMs);
                     return Image(kind, name, reason, Windows.Capture(hwnd));
                 }
@@ -173,7 +192,7 @@ namespace BtiaWatch
                 if (wasOn == true)
                 {
                     Thread.Sleep(settleMs);
-                    return Image(kind, name, "Monitoring was already on; Ctrl+T not sent." + MonitoringNote(hwnd, settleMs), Windows.Capture(hwnd));
+                    return Image(kind, name, where + "Monitoring was already on; Ctrl+T not sent." + MonitoringNote(hwnd, settleMs), Windows.Capture(hwnd));
                 }
 
                 var before = Windows.OtherWindowsOfProcess(hwnd);
@@ -196,8 +215,10 @@ namespace BtiaWatch
                     }
 
                     var note = wasOn == null
-                        ? "Sent Ctrl+T (Monitor all). Warning: the monitoring state could not be read and Ctrl+T toggles monitoring; if the capture shows no monitor values, it was switched off."
+                        ? "Sent Ctrl+T (Monitor all). Warning: the monitoring state could not be read and Ctrl+T toggles monitoring; if the capture shows no monitor values, it was switched off." +
+                          (hwnd == main ? " If the editor is undocked into its own window, no window with a title containing '" + name + "' was found; dock the editor or check the capture." : string.Empty)
                         : "Sent Ctrl+T (Monitor all)." + MonitoringNote(hwnd, settleMs);
+                    note = where + note;
                     return Image(kind, name, note, Windows.Capture(hwnd));
                 }
                 finally
@@ -240,7 +261,7 @@ namespace BtiaWatch
         /// 'A.B[2].C' (SW.Interface.Snapshot.xsd). An export without a 'Snapshot' attribute is returned raw.
         /// With <paramref name="members"/>, only members equal to one of the paths or below it are written.
         /// </summary>
-        internal static string FormatSnapshot(string xml, IReadOnlyCollection<string>? members = null)
+        internal static string FormatSnapshot(string xml, IReadOnlyCollection<string>? members = null, int maxRows = int.MaxValue)
         {
             XDocument doc;
             try
@@ -259,7 +280,10 @@ namespace BtiaWatch
                 return "No snapshot values in the export:\n" + xml;
             }
 
-            var values = snapshot.Descendants().Where(e => e.Name.LocalName == "Value").ToList();
+            // Section headers (Input, Output, Static...) come as Value elements of type "Section" without a value.
+            var values = snapshot.Descendants()
+                .Where(e => e.Name.LocalName == "Value" && !string.Equals((string?)e.Attribute("Type"), "Section", StringComparison.OrdinalIgnoreCase))
+                .ToList();
             var shown = members == null || members.Count == 0
                 ? values
                 : values.Where(v => members.Any(m => IsAtOrBelow((string?)v.Attribute("Path") ?? string.Empty, m))).ToList();
@@ -276,7 +300,11 @@ namespace BtiaWatch
                 var top = values.Select(v => TopLevel((string?)v.Attribute("Path") ?? string.Empty)).Distinct().ToList();
                 sb.AppendLine($"No member matches. Top-level members: {string.Join(", ", top.Take(50))}" + (top.Count > 50 ? $", ... ({top.Count})" : string.Empty));
             }
-            foreach (var value in shown)
+            if (shown.Count > maxRows)
+            {
+                sb.AppendLine($"truncated: true ({shown.Count - maxRows} of {shown.Count} rows not shown, limit {maxRows}; narrow with 'members' or raise 'maxRows')");
+            }
+            foreach (var value in shown.Take(maxRows))
             {
                 sb.AppendLine($"{(string?)value.Attribute("Path")} = {value.Value} ({(string?)value.Attribute("Type")})");
             }

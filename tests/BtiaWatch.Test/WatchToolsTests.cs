@@ -12,6 +12,10 @@ namespace BtiaWatch.Test
         public string State = "Offline";
         public readonly List<string> Calls = new();
         public readonly IntPtr Window = new(0x1234);
+        /// <summary>Project.IsModified read before and after a snapshot; null = unreadable.</summary>
+        public bool? ModifiedBefore = false, ModifiedAfter = false;
+        private int _modifiedReads;
+        public bool? IsProjectModified(int? portalId) => _modifiedReads++ == 0 ? ModifiedBefore : ModifiedAfter;
 
         public string GetOnlineState(int? portalId, string? plc)
         {
@@ -70,6 +74,9 @@ namespace BtiaWatch.Test
         public byte[] Png = { 0x89, 0x50, 0x4E, 0x47 };
         /// <summary>What the Monitor button reads before and after Ctrl+T; null = not found (the default).</summary>
         public bool? MonitoringBefore, MonitoringAfter;
+        /// <summary>Window of an undocked editor; Zero = none.</summary>
+        public IntPtr Floating = IntPtr.Zero;
+        public IntPtr FindFloatingEditor(IntPtr main, string name) => Floating;
 
         /// <summary>Reads returned first, one per call, before falling back to MonitoringBefore/After.</summary>
         public readonly Queue<bool?> MonitoringReads = new();
@@ -255,6 +262,76 @@ namespace BtiaWatch.Test
             StringAssert.StartsWith(text, "No snapshot values");
             StringAssert.Contains(text, xml);
             Assert.AreEqual("not xml", WatchTools.FormatSnapshot("not xml"));
+        }
+
+        [TestMethod]
+        public void FormatSnapshot_LeavesOutSectionRows()
+        {
+            var xml = FakePortal.SnapshotXml("Data_A",
+                "<Value Path=\"Input\" Type=\"Section\"></Value>" +
+                "<Value Path=\"Speed\" Type=\"Int\">3</Value>" +
+                "<Value Path=\"Static\" Type=\"Section\"/>");
+
+            var text = WatchTools.FormatSnapshot(xml);
+
+            Assert.IsFalse(text.Contains("Section"), text);
+            Assert.IsFalse(text.Contains("Members:"), text);
+            StringAssert.EndsWith(text, "Speed = 3 (Int)");
+        }
+
+        [TestMethod]
+        public void FormatSnapshot_MaxRowsCutsAndSaysHowMuchIsLeft()
+        {
+            var values = string.Concat(Enumerable.Range(1, 5).Select(i => $"<Value Path=\"V{i}\" Type=\"Int\">{i}</Value>"));
+
+            var lines = WatchTools.FormatSnapshot(FakePortal.SnapshotXml("D", values), null, 2)
+                .Split(new[] { Environment.NewLine }, StringSplitOptions.None);
+
+            StringAssert.StartsWith(lines[1], "truncated: true (3 of 5 rows not shown, limit 2;");
+            CollectionAssert.AreEqual(new[] { "V1 = 1 (Int)", "V2 = 2 (Int)" }, lines.Skip(2).ToArray());
+        }
+
+        [TestMethod]
+        public void WatchDb_MaxRowsClampedAndPassedOn()
+        {
+            _fake.State = "Online";
+
+            var text = TextOf(WatchTools.WatchDb("Data_A", maxRows: 0));
+
+            StringAssert.Contains(text, "Speed = 6 (Int)");
+            StringAssert.Contains(text, "projectMarkedModified: false");
+        }
+
+        [TestMethod]
+        public void WatchDb_ReportsProjectMarkedModifiedBySnapshot()
+        {
+            _fake.State = "Online";
+            _fake.ModifiedAfter = true;
+            StringAssert.Contains(TextOf(WatchTools.WatchDb("Data_A")), "projectMarkedModified: true (set by the snapshot; the project was not saved)");
+        }
+
+        [TestMethod]
+        public void WatchDb_ReportsProjectAlreadyModifiedAndUnknown()
+        {
+            _fake.State = "Online";
+            _fake.ModifiedBefore = true;
+            _fake.ModifiedAfter = true;
+            StringAssert.Contains(TextOf(WatchTools.WatchDb("Data_A")), "already marked as modified before this call");
+
+            _fake.ModifiedBefore = _fake.ModifiedAfter = null;
+            StringAssert.Contains(TextOf(WatchTools.WatchDb("Data_A")), "projectMarkedModified: unknown");
+        }
+
+        [TestMethod]
+        public void WatchScreen_UsesFloatingEditorWindow()
+        {
+            _windows.Floating = new IntPtr(0x4242);
+
+            var text = TextOf(WatchTools.WatchScreen("Watch_1", sendShortcut: false, settleMs: 0));
+
+            StringAssert.Contains(text, "Floating editor window used.");
+            CollectionAssert.Contains(_windows.Log, "capture 16962");
+            CollectionAssert.DoesNotContain(_windows.Log, "capture 4660");
         }
 
         private static string PidXml() => FakePortal.SnapshotXml("PID_Heater",

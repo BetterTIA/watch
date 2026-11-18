@@ -33,6 +33,14 @@ namespace BtiaWatch
             }
         }
 
+        public bool? IsProjectModified(int? portalId)
+        {
+            lock (_lock)
+            {
+                return Attach(portalId).Portal.Projects.FirstOrDefault()?.IsModified;
+            }
+        }
+
         public string GoOnline(int? portalId, string? plc, string pcInterface, string address)
         {
             lock (_lock)
@@ -48,7 +56,7 @@ namespace BtiaWatch
                         string.Join(", ", interfaces.Select(i => $"{i.Mode}: {i.Interface.Name} #{i.Interface.Number}")));
                 }
 
-                // shortcut: address created on the PC interface as GoOnline(ConfigurationAddress) expects; not yet tried against a PLC.
+                // Verified live (V21): GoOnline(ConfigurationAddress) with an address from the PC interface. Creating a missing address changes the offline project.
                 var addresses = matches[0].Interface.Addresses;
                 provider.GoOnline(addresses.Find(address) ?? addresses.Create(address));
                 return provider.State.ToString();

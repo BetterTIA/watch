@@ -31,6 +31,9 @@ namespace BtiaWatch
         /// <summary>Takes a snapshot of the actual values of one data block and returns its SimaticML export.</summary>
         string ExportDbSnapshot(int? portalId, string? plc, string dbName);
 
+        /// <summary>Project.IsModified of the open project; null when it cannot be read.</summary>
+        bool? IsProjectModified(int? portalId);
+
         /// <summary>Opens the object in its editor and returns the handle of the TIA Portal main window.</summary>
         IntPtr ShowInEditor(int? portalId, string? plc, WatchTarget target, string name);
     }

@@ -16,14 +16,14 @@ It is one of the four tools of the [BetterTIA](https://github.com/BetterTIA) set
 All four are developed, used and tested only with TIA Portal V21.
 
 > Status: early (0.1.x). The tools are tested against a fake TIA Portal and were checked once against a real PLC
-> with TIA Portal V21 (see below).
+> with TIA Portal V21 (see below); what only the fake covers is marked there.
 
 ## Tools
 
 | Tool | What it does | Source |
 | --- | --- | --- |
 | `watch_online` | Online state of a PLC (`OnlineProvider.State`); `action` `goOnline` connects to an allowed `target` address over a named `pcInterface` (or adopts a connection that is already online), `goOffline` disconnects | Openness |
-| `watch_db` | Actual values of one or more data blocks: `ValueService.CreateSnapshot()`, then `InterfaceSnapshot.Export()` with read-only attributes; returns the snapshot time and one `path = value (type)` line per member. Technology objects (`PID_Temp`, `PID_Compact`, ...) are found by name, but Openness V21 gives no actual values for them (`Interface` is not supported on `TechnologicalInstanceDB`): the call says so and points to a watch table with `watch_screen`; `members` keeps only the members at or below the given paths (e.g. `State,Config.Input`). Requires the PLC to be online | Openness |
+| `watch_db` | Actual values of one or more data blocks: `ValueService.CreateSnapshot()`, then `InterfaceSnapshot.Export()` with read-only attributes; returns the snapshot time and one `path = value (type)` line per member (section headers left out; at most `maxRows` rows per block, default 500, otherwise `truncated: true` and the number of rows left out; the answer ends with `projectMarkedModified`). Technology objects (`PID_Temp`, `PID_Compact`, ...) are found by name, but Openness V21 gives no actual values for them (`Interface` is not supported on `TechnologicalInstanceDB`): the call says so and points to a watch table with `watch_screen`; `members` keeps only the members at or below the given paths (e.g. `State,Config.Input`). Requires the PLC to be online | Openness |
 | `watch_screen` | Opens a watch table, tag table or block (`ShowInEditor()`), sends Ctrl+T ("Monitor all") when allowed, and returns a PNG capture of the TIA Portal window (`PrintWindow`) as MCP image content | Openness + Win32 |
 
 Common parameters: `plc` (PLC software name, optional when the project has one PLC) and `portalId` (process id,
@@ -41,10 +41,10 @@ optional when one TIA Portal is running). The server attaches to a running TIA P
   the given target on the given PG/PC interface (`ConnectionConfiguration.Modes` -> `PcInterfaces` -> `Addresses`).
   The parameterless `GoOnline()`, which connects over the last used interface to the address stored in the project,
   is never called; a test scans the sources for it.
-- **Ctrl+T only over a connection this server opened.** In an offline editor Ctrl+T makes TIA Portal open its
+- **Ctrl+T only over a connection this server opened or adopted.** In an offline editor Ctrl+T makes TIA Portal open its
   "Go online" dialog and connect by itself over the last used interface. `watch_screen` therefore sends Ctrl+T only
   when `OnlineProvider.State` is `Online` and the connection was opened by `watch_online goOnline` of this server
-  process. Otherwise it captures the editor without the shortcut and says why. `sendShortcut=false` never sends it.
+  process (an adopted connection counts, see below). Otherwise it captures the editor without the shortcut and says why. `sendShortcut=false` never sends it.
 - **Ctrl+T is a toggle.** Before sending it, the server reads the pressed state of the editor's "Monitor" toolbar
   button (MSAA) and sends Ctrl+T only when monitoring is off; afterwards it reads the state again. When the button
   cannot be read, Ctrl+T is sent once with a warning. One call sends it at most once.
@@ -63,9 +63,9 @@ optional when one TIA Portal is running). The server attaches to a running TIA P
 
 - Nothing writes values to the PLC. The value-loading methods of `ValueService` are not called anywhere in the code,
   and no parameter can reach them. A test scans the sources for them.
-- Fail-safe data blocks are refused by `watch_db`.
+- Fail-safe data blocks are refused by `watch_db` (tested only against the fake: the refusal sits in the Openness layer, which the tests do not reach).
 - Side effects that remain: `watch_db` stores the snapshot in the offline project, so TIA Portal shows the project as
-  changed (the server never saves it); `watch_screen` opens an editor and briefly brings TIA Portal to the front.
+  changed (the server never saves it, and Openness has no way to undo it; the answer reports `projectMarkedModified`); `goOnline` creates the given address on the PG/PC interface when it is not there yet, which also changes the offline project; `watch_screen` opens an editor and briefly brings TIA Portal to the front.
 
 ## Verified so far
 
@@ -74,8 +74,9 @@ connection, `watch_db` values of global DBs with structures and arrays, `watch_s
 and a LAD block (monitoring state read, Ctrl+T sent only when off), `goOffline`. Call the tools one after another:
 two concurrent `watch_screen` calls fight over the active editor.
 
-Not yet checked: instance DBs of GRAPH blocks, very large DBs, floating editors, other monitors
-and DPI scaling.
+Not yet checked: instance DBs of GRAPH blocks, very large DBs (the `maxRows` cut is tested only against the fake),
+`projectMarkedModified` (reads `Project.IsModified`; fake only), floating editors (found by window title; fake only),
+other monitors and DPI scaling.
 
 ## Requirements
 
