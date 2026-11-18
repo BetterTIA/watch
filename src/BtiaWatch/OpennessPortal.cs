@@ -37,7 +37,14 @@ namespace BtiaWatch
         {
             lock (_lock)
             {
-                return Attach(portalId).Portal.Projects.FirstOrDefault()?.IsModified;
+                try
+                {
+                    return Attach(portalId).Portal.Projects.FirstOrDefault()?.IsModified;
+                }
+                catch (Exception)
+                {
+                    return null; // an unreadable flag must not lose the snapshot values already read
+                }
             }
         }
 
