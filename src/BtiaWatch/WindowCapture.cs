@@ -108,13 +108,57 @@ namespace BtiaWatch
 
         /// <summary>
         /// A visible top-level window of the TIA Portal process, other than the main window, whose title contains
-        /// <paramref name="name"/> (an undocked editor); Zero when there is none or the match is ambiguous.
+        /// <paramref name="name"/> as a whole token (an undocked editor); dialogs (#32770) and owned windows are skipped.
+        /// Zero when there is none or the match is ambiguous.
         /// </summary>
-        public static IntPtr FindFloatingEditor(IntPtr main, string name)
+        public static IntPtr FindFloatingEditor(IntPtr main, string name) =>
+            PickFloating(OtherWindowsOfProcess(main)
+                .Where(w => GetWindow(w, GwOwner) == IntPtr.Zero && ClassName(w) != DialogClass)
+                .Select(w => (w, Title(w))), name);
+
+        /// <summary>
+        /// The one window whose title contains <paramref name="name"/> as a whole token (not inside a longer name);
+        /// Zero for no match or several, so that no key ever goes to a guessed window.
+        /// </summary>
+        internal static IntPtr PickFloating(IEnumerable<(IntPtr Window, string Title)> candidates, string name)
         {
-            var hits = OtherWindowsOfProcess(main).Where(w => Title(w).IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0).ToList();
-            return hits.Count == 1 ? hits[0] : IntPtr.Zero;
+            var hits = candidates.Where(c => ContainsToken(c.Title, name)).ToList();
+            return hits.Count == 1 ? hits[0].Window : IntPtr.Zero;
         }
+
+        internal static bool ContainsToken(string title, string name)
+        {
+            name = name.Trim();
+            for (var i = name.Length == 0 ? -1 : title.IndexOf(name, StringComparison.OrdinalIgnoreCase); i >= 0;
+                 i = title.IndexOf(name, i + 1, StringComparison.OrdinalIgnoreCase))
+            {
+                var before = i == 0 || !IsNameChar(title[i - 1]);
+                var after = i + name.Length == title.Length || !IsNameChar(title[i + name.Length]);
+                if (before && after)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static bool IsNameChar(char c) => char.IsLetterOrDigit(c) || c == '_';
+
+        private const string DialogClass = "#32770";
+        private const uint GwOwner = 4;
+
+        private static string ClassName(IntPtr hwnd)
+        {
+            var sb = new System.Text.StringBuilder(256);
+            GetClassName(hwnd, sb, sb.Capacity);
+            return sb.ToString();
+        }
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetClassName(IntPtr hwnd, System.Text.StringBuilder text, int max);
 
         private static string Title(IntPtr hwnd)
         {

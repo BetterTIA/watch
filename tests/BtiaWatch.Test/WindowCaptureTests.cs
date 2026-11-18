@@ -10,6 +10,33 @@ namespace BtiaWatch.Test
 {
     /// <summary>PrintWindow on a window of this test process; no TIA Portal involved.</summary>
     [TestClass]
+    public class FloatingEditorMatchTests
+    {
+        private static IntPtr Pick(string name, params string[] titles) =>
+            WindowCapture.PickFloating(titles.Select((t, i) => (new IntPtr(i + 1), t)), name);
+
+        [TestMethod]
+        public void SingleWholeTokenMatch_IsPicked() => Assert.AreEqual(new IntPtr(2), Pick("Watch_1", "TIA Portal", "Watch_1 - PLC_1"));
+
+        [TestMethod]
+        public void NameInsideLongerName_IsNotPicked()
+        {
+            Assert.AreEqual(IntPtr.Zero, Pick("DB1", "DB10 - PLC_1"));
+            Assert.AreEqual(IntPtr.Zero, Pick("Watch", "My_Watch_table"));
+        }
+
+        [TestMethod]
+        public void TwoMatches_PickNothing() => Assert.AreEqual(IntPtr.Zero, Pick("Watch_1", "Watch_1 - PLC_1", "PLC_2 / Watch_1"));
+
+        [TestMethod]
+        public void NoMatchOrEmptyName_PickNothing()
+        {
+            Assert.AreEqual(IntPtr.Zero, Pick("Watch_1", "Other"));
+            Assert.AreEqual(IntPtr.Zero, Pick("", "Other"));
+        }
+    }
+
+    [TestClass]
     public class WindowCaptureTests
     {
         [TestMethod]
