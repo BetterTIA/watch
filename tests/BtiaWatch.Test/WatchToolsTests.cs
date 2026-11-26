@@ -71,6 +71,9 @@ namespace BtiaWatch.Test
         public readonly IntPtr Dialog = new(0x5555);
         public bool DialogAfterShortcut;
         public bool ShortcutSent;
+        /// <summary>Whether the MSAA press of the Monitor button succeeds; false = no button found (the default).</summary>
+        public bool ButtonPressWorks;
+        public bool ButtonPressed;
         public byte[] Png = { 0x89, 0x50, 0x4E, 0x47 };
         /// <summary>What the Monitor button reads before and after Ctrl+T; null = not found (the default).</summary>
         public bool? MonitoringBefore, MonitoringAfter;
@@ -82,7 +85,7 @@ namespace BtiaWatch.Test
         public readonly Queue<bool?> MonitoringReads = new();
 
         public bool? IsMonitoring(IntPtr hwnd) =>
-            MonitoringReads.Count > 0 ? MonitoringReads.Dequeue() : ShortcutSent ? MonitoringAfter : MonitoringBefore;
+            MonitoringReads.Count > 0 ? MonitoringReads.Dequeue() : ShortcutSent || ButtonPressed ? MonitoringAfter : MonitoringBefore;
 
         public byte[] Capture(IntPtr hwnd) { Log.Add($"capture {hwnd}"); return Png; }
         public void Restore(IntPtr hwnd) => Log.Add($"restore {hwnd}");
@@ -90,9 +93,10 @@ namespace BtiaWatch.Test
         public void Activate(IntPtr hwnd) => Log.Add($"activate {hwnd}");
         public bool SendMonitorShortcut(IntPtr hwnd) { Log.Add($"ctrl+t {hwnd}"); ShortcutSent = true; return true; }
         public bool PressEscape(IntPtr hwnd) { Log.Add($"esc {hwnd}"); return true; }
+        public bool PressMonitorButton(IntPtr hwnd) { Log.Add($"msaa {hwnd}"); ButtonPressed = ButtonPressWorks; return ButtonPressWorks; }
 
         public IReadOnlyList<IntPtr> OtherWindowsOfProcess(IntPtr hwnd) =>
-            DialogAfterShortcut && ShortcutSent ? new[] { new IntPtr(0x7777), Dialog } : new[] { new IntPtr(0x7777) };
+            DialogAfterShortcut && (ShortcutSent || ButtonPressed) ? new[] { new IntPtr(0x7777), Dialog } : new[] { new IntPtr(0x7777) };
     }
 
     [TestClass]
@@ -415,8 +419,9 @@ namespace BtiaWatch.Test
             Assert.IsFalse(result.IsError == true, TextOf(result));
             CollectionAssert.AreEqual(new[] { "state ", "show WatchTable Watch_1" }, _fake.Calls);
             var w = _fake.Window;
-            CollectionAssert.AreEqual(new[] { $"restore {w}", $"ctrl+t {w}", $"capture {w}", $"activate {_windows.Previous}" }, _windows.Log);
+            CollectionAssert.AreEqual(new[] { $"restore {w}", $"msaa {w}", $"ctrl+t {w}", $"capture {w}", $"activate {_windows.Previous}" }, _windows.Log);
             StringAssert.Contains(TextOf(result), "toggles");
+            StringAssert.Contains(TextOf(result), "fell back to Ctrl+T");
             var image = result.Content.OfType<ImageContentBlock>().Single();
             Assert.AreEqual("image/png", image.MimeType);
             CollectionAssert.AreEqual(_windows.Png, image.DecodedData.ToArray());
@@ -511,6 +516,7 @@ namespace BtiaWatch.Test
 
             Assert.IsFalse(result.IsError == true, TextOf(result));
             Assert.IsFalse(_windows.ShortcutSent);
+            Assert.IsFalse(_windows.Log.Any(l => l.StartsWith("msaa")), "offline nothing may be pressed");
             StringAssert.Contains(TextOf(result), "NOT sent");
             StringAssert.Contains(TextOf(result), "'Offline'");
             Assert.AreEqual(1, result.Content.OfType<ImageContentBlock>().Count());
@@ -564,6 +570,68 @@ namespace BtiaWatch.Test
             CollectionAssert.Contains(_windows.Log, $"esc {_windows.Dialog}");
             Assert.IsFalse(_windows.Log.Any(l => l.StartsWith("capture")));
             Assert.AreEqual($"activate {_windows.Previous}", _windows.Log.Last());
+        }
+
+        [TestMethod]
+        public void WatchScreen_MsaaPress_SwitchesMonitoringOnWithoutFocusOrKeys()
+        {
+            GoOnlineByTool();
+            _windows.ButtonPressWorks = true;
+            _windows.MonitoringBefore = false;
+            _windows.MonitoringAfter = true;
+
+            var result = WatchTools.WatchScreen("Watch_1", settleMs: 0);
+
+            Assert.IsFalse(result.IsError == true, TextOf(result));
+            var w = _fake.Window;
+            CollectionAssert.AreEqual(new[] { $"restore {w}", $"msaa {w}", $"capture {w}" }, _windows.Log);
+            StringAssert.Contains(TextOf(result), "Pressed the Monitor button through MSAA (no focus change, no keys). Monitoring is on.");
+        }
+
+        [TestMethod]
+        public void WatchScreen_MsaaPressLeavesMonitoringOff_FallsBackToCtrlT()
+        {
+            GoOnlineByTool();
+            _windows.ButtonPressWorks = true;
+            _windows.MonitoringReads.Enqueue(false); // before
+            _windows.MonitoringReads.Enqueue(false); // after the MSAA press
+            _windows.MonitoringAfter = true;         // after Ctrl+T
+
+            var text = TextOf(WatchTools.WatchScreen("Watch_1", settleMs: 0));
+
+            Assert.AreEqual(1, _windows.Log.Count(l => l.StartsWith("ctrl+t")));
+            StringAssert.Contains(text, "monitoring still reads as off; fell back to Ctrl+T");
+            StringAssert.Contains(text, "Monitoring is on.");
+            Assert.AreEqual($"activate {_windows.Previous}", _windows.Log.Last());
+        }
+
+        [TestMethod]
+        public void WatchScreen_MsaaPressStateUnreadable_WarnsAndSendsNoCtrlT()
+        {
+            GoOnlineByTool();
+            _windows.ButtonPressWorks = true;
+            _windows.MonitoringBefore = false;
+
+            var text = TextOf(WatchTools.WatchScreen("Watch_1", settleMs: 0));
+
+            // Ctrl+T toggles: after a press that may have worked, an unreadable state must not trigger it.
+            Assert.IsFalse(_windows.ShortcutSent);
+            StringAssert.Contains(text, "could not be read");
+        }
+
+        [TestMethod]
+        public void WatchScreen_DialogAfterMsaaPress_IsClosedAndIsAnError()
+        {
+            GoOnlineByTool();
+            _windows.ButtonPressWorks = true;
+            _windows.DialogAfterShortcut = true;
+
+            var result = WatchTools.WatchScreen("DB_1", "block", settleMs: 0);
+
+            Assert.IsTrue(result.IsError == true);
+            StringAssert.Contains(TextOf(result), "after pressing the Monitor button");
+            CollectionAssert.Contains(_windows.Log, $"esc {_windows.Dialog}");
+            Assert.IsFalse(_windows.ShortcutSent);
         }
 
         [TestMethod]

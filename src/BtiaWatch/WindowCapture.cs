@@ -240,11 +240,11 @@ namespace BtiaWatch
 namespace BtiaWatch
 {
     /// <summary>
-    /// Reads whether the visible editor monitors, from the pressed state of its "Monitor" toolbar button.
+    /// Reads whether the visible editor monitors, from the pressed state of its "Monitor" toolbar button, and can press it.
     /// TIA Portal draws its toolbars itself; UI Automation shows no buttons there, MSAA (oleacc) does:
     /// name e.g. "InterfaceEditor.Monitor_ICO_PE_TbMonitor"; monitoring = role check button with state bit CHECKED,
     /// off = TIA swaps the role to push button (spike, V21).
-    /// Read-only: only asks for names, roles and states.
+    /// Reading only asks for names, roles and states; pressing uses accDoDefaultAction (no focus change, no keys).
     /// </summary>
     public static class MonitorButton
     {
@@ -255,7 +255,34 @@ namespace BtiaWatch
         /// <summary>True/false when every Monitor button found agrees; null when none is found or they disagree (split editor space).</summary>
         public static bool? IsChecked(IntPtr hwnd)
         {
-            var states = new List<bool>();
+            var states = Find(hwnd).Select(b => b.Checked).Distinct().ToList();
+            return states.Count == 1 ? states[0] : null;
+        }
+
+        /// <summary>
+        /// Presses every visible Monitor button that is not pressed, with MSAA accDoDefaultAction: TIA Portal is not
+        /// brought to the front and no keys are sent. False when no button was found or no press succeeded.
+        /// </summary>
+        public static bool PressUnchecked(IntPtr hwnd)
+        {
+            var pressed = 0;
+            foreach (var button in Find(hwnd).Where(b => !b.Checked))
+            {
+                try
+                {
+                    button.Owner.accDoDefaultAction(button.Id);
+                    pressed++;
+                }
+                catch (COMException)
+                {
+                }
+            }
+            return pressed > 0;
+        }
+
+        private static List<(IAccessible Owner, object Id, bool Checked)> Find(IntPtr hwnd)
+        {
+            var buttons = new List<(IAccessible, object, bool)>();
             EnumChildWindows(hwnd, (child, _) =>
             {
                 // Hidden editors keep their windows; only the visible ones count.
@@ -271,12 +298,12 @@ namespace BtiaWatch
                     // Suffix, not substring: the neighbouring "..._TbMonitorOnce" button must not count.
                     if ((role == RoleCheckButton || role == RolePushButton) && name.EndsWith("_TbMonitor", StringComparison.OrdinalIgnoreCase))
                     {
-                        states.Add(role == RoleCheckButton && (State(owner, id) & StateChecked) != 0);
+                        buttons.Add((owner, id, role == RoleCheckButton && (State(owner, id) & StateChecked) != 0));
                     }
                 }
                 return true;
             }, IntPtr.Zero);
-            return states.Count > 0 && states.Distinct().Count() == 1 ? states[0] : null;
+            return buttons;
         }
 
         private static IAccessible? FromWindow(IntPtr hwnd)
@@ -312,7 +339,7 @@ namespace BtiaWatch
             }
         }
 
-        // IAccessible up to get_accState, in vtable order; declared here so no extra assembly reference is needed.
+        // IAccessible up to accDoDefaultAction, in vtable order; declared here so no extra assembly reference is needed.
         [ComImport, Guid("618736E0-3C3D-11CF-810C-00AA00389B71"), InterfaceType(ComInterfaceType.InterfaceIsDual)]
         private interface IAccessible
         {
@@ -324,6 +351,17 @@ namespace BtiaWatch
             string get_accDescription(object child);
             object get_accRole(object child);
             object get_accState(object child);
+            string get_accHelp(object child);
+            int get_accHelpTopic(out string helpFile, object child);
+            string get_accKeyboardShortcut(object child);
+            object get_accFocus();
+            object get_accSelection();
+            string get_accDefaultAction(object child);
+            void accSelect(int flags, object child);
+            void accLocation(out int left, out int top, out int width, out int height, object child);
+            object accNavigate(int direction, object start);
+            object accHitTest(int left, int top);
+            void accDoDefaultAction(object child);
         }
 
         private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
@@ -351,6 +389,8 @@ namespace BtiaWatch
         void Activate(IntPtr hwnd);
         /// <summary>Ctrl+T ("Monitor all" toggle in every STEP 7 editor of V21); false when nothing was sent.</summary>
         bool SendMonitorShortcut(IntPtr hwnd);
+        /// <summary>Presses the editor's Monitor button through MSAA, without focus or keys; false when no button was pressed.</summary>
+        bool PressMonitorButton(IntPtr hwnd);
         bool PressEscape(IntPtr hwnd);
         IReadOnlyList<IntPtr> OtherWindowsOfProcess(IntPtr hwnd);
         /// <summary>Whether the visible editor monitors; null when that cannot be read.</summary>
@@ -366,6 +406,7 @@ namespace BtiaWatch
         public IntPtr Foreground() => WindowCapture.Foreground();
         public void Activate(IntPtr hwnd) => WindowCapture.Activate(hwnd);
         public bool SendMonitorShortcut(IntPtr hwnd) => WindowCapture.PressKeys(hwnd, WindowCapture.VkControl, WindowCapture.VkT);
+        public bool PressMonitorButton(IntPtr hwnd) => MonitorButton.PressUnchecked(hwnd);
         public bool PressEscape(IntPtr hwnd) => WindowCapture.PressKeys(hwnd, WindowCapture.VkEscape);
         public IReadOnlyList<IntPtr> OtherWindowsOfProcess(IntPtr hwnd) => WindowCapture.OtherWindowsOfProcess(hwnd);
         public bool? IsMonitoring(IntPtr hwnd) => MonitorButton.IsChecked(hwnd);

@@ -15,6 +15,11 @@
 
 ### Changed
 
+- `watch_screen` switches monitoring on by pressing the editor's Monitor button through MSAA (`accDoDefaultAction`),
+  so TIA Portal is not brought to the front and the user keeps the focus. Ctrl+T (with `SetForegroundWindow` and
+  `SendInput`) is only the fallback when no button can be pressed or monitoring still reads as off; the result says
+  which path was used. Same rule as before: nothing is pressed or sent unless this server opened the connection.
+  Not yet checked against TIA Portal.
 - `watch_db` leaves out section rows (`Type="Section"`: Input, Output, Static...), so only values remain; they do not
   count in `Members: x of y` either.
 - README: adopted connections, the side effect of creating a PG/PC address on `goOnline`, and what is tested only

@@ -143,12 +143,12 @@ namespace BtiaWatch
         }
 
         [McpServerTool(Name = "watch_screen", Title = "Screenshot of a monitored editor", ReadOnly = true, Destructive = false, OpenWorld = false),
-         Description("Open a watch table, tag table or block in TIA Portal (ShowInEditor) and return a PNG capture of the TIA Portal window, with monitoring switched on when possible. Ctrl+T (Monitor all) is only sent when the PLC is online over a connection this server opened with watch_online goOnline, and only when monitoring is not already on: the state is read from the pressed state of the Monitor button in the editor's toolbar, retried for up to settleMs while the editor is still drawing. When the state cannot be read, Ctrl+T is sent once with a warning. After Ctrl+T the state is read again and the result says whether monitoring is on.")]
+         Description("Open a watch table, tag table or block in TIA Portal (ShowInEditor) and return a PNG capture of the TIA Portal window, with monitoring switched on when possible. Monitoring is only switched on when the PLC is online over a connection this server opened with watch_online goOnline, and only when it is not already on: the state is read from the pressed state of the Monitor button in the editor's toolbar, retried for up to settleMs while the editor is still drawing. The Monitor button is pressed through MSAA, without bringing TIA Portal to the front; only when that fails or monitoring stays off, Ctrl+T (Monitor all) is sent, which needs TIA Portal in front for a moment. When the state cannot be read, Ctrl+T is sent once with a warning. The result says which path was used and whether monitoring is on.")]
         public static CallToolResult WatchScreen(
             [Description("name: name of the watch table, tag table or block")] string name,
             [Description("kind: 'watchTable' (default), 'tagTable' or 'block'")] string kind = "watchTable",
             [Description("plc: name of the PLC software. Leave empty when the project has one PLC")] string? plc = null,
-            [Description("sendShortcut: send Ctrl+T (Monitor all) to the editor. Default true; false only captures")] bool sendShortcut = true,
+            [Description("sendShortcut: switch monitoring on (Monitor button through MSAA, Ctrl+T only as fallback). Default true; false only captures")] bool sendShortcut = true,
             [Description("settleMs: wait before the capture, and the longest wait for the monitoring state to become readable, in milliseconds")] int settleMs = DefaultSettleMs,
             [Description("portalId: process id of the TIA Portal instance. Leave empty when only one is running")] int? portalId = null)
         {
@@ -177,53 +177,78 @@ namespace BtiaWatch
 
                 if (!sendShortcut || !OpenedByTool.Contains(key))
                 {
-                    // Offline, Ctrl+T makes TIA Portal connect on its own over the last used interface (spike, V21).
+                    // Offline, Ctrl+T makes TIA Portal connect on its own over the last used interface (spike, V21); the button is kept to the same rule.
                     var reason = where + (!sendShortcut
                         ? "No monitoring shortcut sent (sendShortcut=false)."
                         : $"Monitoring shortcut NOT sent: the PLC is '{state}'" +
                           (state == "Online" ? ", but the connection was not opened by this server" : string.Empty) +
-                          ". Ctrl+T is only sent over a connection opened with watch_online goOnline; the capture shows no monitor values.");
+                          ". The Monitor button is only pressed and Ctrl+T only sent over a connection opened with watch_online goOnline; the capture shows no monitor values.");
                     Thread.Sleep(settleMs);
                     return Image(kind, name, reason, Windows.Capture(hwnd));
                 }
 
-                // Ctrl+T toggles, so it is only sent when monitoring is not already on.
+                // Monitoring is only switched on when it is not already on (Ctrl+T toggles).
                 var wasOn = ReadMonitoring(hwnd, settleMs);
                 if (wasOn == true)
                 {
                     Thread.Sleep(settleMs);
-                    return Image(kind, name, where + "Monitoring was already on; Ctrl+T not sent." + MonitoringNote(hwnd, settleMs), Windows.Capture(hwnd));
+                    return Image(kind, name, where + "Monitoring was already on; nothing pressed, Ctrl+T not sent." + MonitoringNote(hwnd, settleMs), Windows.Capture(hwnd));
                 }
 
                 var before = Windows.OtherWindowsOfProcess(hwnd);
                 var previous = Windows.Foreground();
-                try
+                var keysSent = false;
+                // A dialog after switching monitoring on (e.g. "Go online") is closed with Esc and nothing is captured.
+                void ThrowOnDialog(string action)
                 {
-                    if (!Windows.SendMonitorShortcut(hwnd))
-                    {
-                        Thread.Sleep(settleMs);
-                        return Image(kind, name, "TIA Portal could not be brought to the front; no keys were sent.", Windows.Capture(hwnd));
-                    }
-
-                    Thread.Sleep(settleMs);
                     var dialog = Windows.OtherWindowsOfProcess(hwnd).Except(before).FirstOrDefault();
                     if (dialog != IntPtr.Zero)
                     {
+                        keysSent = true;
                         var closed = Windows.PressEscape(dialog);
-                        throw new InvalidOperationException("TIA Portal opened a dialog after Ctrl+T; " +
+                        throw new InvalidOperationException($"TIA Portal opened a dialog after {action}; " +
                             (closed ? "it was closed with Esc." : "it could not be closed, check TIA Portal.") + " Nothing was captured.");
                     }
+                }
+
+                try
+                {
+                    // First path: press the Monitor button through MSAA; TIA Portal is not brought to the front, no keys.
+                    var fallback = "Monitor button not pressed through MSAA (not found or the press failed); fell back to Ctrl+T, which brings TIA Portal to the front for a moment. ";
+                    if (Windows.PressMonitorButton(hwnd))
+                    {
+                        Thread.Sleep(settleMs);
+                        ThrowOnDialog("pressing the Monitor button");
+                        var after = ReadMonitoring(hwnd, settleMs);
+                        wasOn = after;
+                        if (after != false)
+                        {
+                            return Image(kind, name, where + "Pressed the Monitor button through MSAA (no focus change, no keys)." +
+                                (after == true ? " Monitoring is on." : " Warning: the monitoring state could not be read after the wait."), Windows.Capture(hwnd));
+                        }
+                        fallback = "Pressed the Monitor button through MSAA, but monitoring still reads as off; fell back to Ctrl+T, which brings TIA Portal to the front for a moment. ";
+                    }
+
+                    keysSent = true;
+                    if (!Windows.SendMonitorShortcut(hwnd))
+                    {
+                        Thread.Sleep(settleMs);
+                        return Image(kind, name, where + fallback + "TIA Portal could not be brought to the front; no keys were sent.", Windows.Capture(hwnd));
+                    }
+
+                    Thread.Sleep(settleMs);
+                    ThrowOnDialog("Ctrl+T");
 
                     var note = wasOn == null
                         ? "Sent Ctrl+T (Monitor all). Warning: the monitoring state could not be read and Ctrl+T toggles monitoring; if the capture shows no monitor values, it was switched off." +
                           (hwnd == main ? " If the editor is undocked into its own window, no window with a title containing '" + name + "' was found; dock the editor or check the capture." : string.Empty)
                         : "Sent Ctrl+T (Monitor all)." + MonitoringNote(hwnd, settleMs);
-                    note = where + note;
-                    return Image(kind, name, note, Windows.Capture(hwnd));
+                    return Image(kind, name, where + fallback + note, Windows.Capture(hwnd));
                 }
                 finally
                 {
-                    if (previous != IntPtr.Zero && previous != hwnd)
+                    // Focus is only given back when keys took it; the MSAA press never changes it.
+                    if (keysSent && previous != IntPtr.Zero && previous != hwnd)
                     {
                         Windows.Activate(previous);
                     }
